@@ -10,6 +10,43 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 
 type Source = { id: string; repo: string | null; branch: string | null; folder: string | null; mount: string; lastSyncAt: string | null };
+
+function SourceRow({ s, slug, setMsg, reload, runSync }: {
+  s: Source; slug: string; setMsg: (m: string) => void; reload: () => void; runSync: (id: string) => void;
+}) {
+  const [branch, setBranch] = useState(s.branch ?? "main");
+  const [folder, setFolder] = useState(s.folder ?? "");
+  const [mount, setMount] = useState(s.mount);
+  const dirty = branch !== (s.branch ?? "main") || folder !== (s.folder ?? "") || mount !== s.mount;
+  return (
+    <TableRow>
+      <TableCell className="mono text-xs">{s.repo}</TableCell>
+      <TableCell><Input className="w-24 h-7 mono text-xs" value={branch} onChange={(e) => setBranch(e.target.value)} /></TableCell>
+      <TableCell><Input className="w-28 h-7 mono text-xs" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="/" /></TableCell>
+      <TableCell><Input className="w-24 h-7 mono text-xs" value={mount} onChange={(e) => setMount(e.target.value)} /></TableCell>
+      <TableCell className="mono text-[11px]">{s.lastSyncAt?.slice(0, 16) ?? "never"}</TableCell>
+      <TableCell className="whitespace-nowrap">
+        {dirty ? (
+          <Button size="sm" onClick={async () => {
+            setMsg("saving…");
+            const r = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ org: slug, updateId: s.id, branch, folder, mount }) });
+            const d = await r.json(); setMsg(d.error ? `✗ ${d.error}` : `✓ 已改設定並重新同步 ${d.synced} 份`); reload();
+          }}>Save + resync</Button>
+        ) : (
+          <Button variant="outline" size="sm" onClick={() => runSync(s.id)}>
+            <RefreshCw className="size-3.5" /> Sync</Button>
+        )}
+        <Button variant="ghost" size="sm" className="ml-1" style={{ color: "var(--risk)" }} onClick={async () => {
+          if (!confirm(`移除 ${s.repo}？它同步進來的文件會一併刪除（repo 本身不動）。`)) return;
+          await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ org: slug, deleteId: s.id }) });
+          setMsg("✓ 已移除"); reload();
+        }}>移除</Button>
+      </TableCell>
+    </TableRow>
+  );
+}
 type Installation = { installationId: string; account: string; repos: { fullName: string; defaultBranch: string }[] };
 
 export function SettingsClient({ slug, orgName }: { slug: string; orgName: string }) {
@@ -109,18 +146,11 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
 
       <Table>
         <TableHeader><TableRow>
-          <TableHead>repo</TableHead><TableHead>folder</TableHead><TableHead>mount</TableHead>
-          <TableHead>last sync</TableHead><TableHead /></TableRow></TableHeader>
+          <TableHead>repo</TableHead><TableHead>branch</TableHead><TableHead>folder</TableHead>
+          <TableHead>mount</TableHead><TableHead>last sync</TableHead><TableHead /></TableRow></TableHeader>
         <TableBody>
           {sources.map((s) => (
-            <TableRow key={s.id}>
-              <TableCell className="mono text-xs">{s.repo}@{s.branch}</TableCell>
-              <TableCell className="mono text-xs">{s.folder || "/"}</TableCell>
-              <TableCell className="mono text-xs">{s.mount}</TableCell>
-              <TableCell className="mono text-[11px]">{s.lastSyncAt?.slice(0, 16) ?? "never"}</TableCell>
-              <TableCell><Button variant="outline" size="sm" onClick={() => runSync(s.id)}>
-                <RefreshCw className="size-3.5" /> Sync now</Button></TableCell>
-            </TableRow>
+            <SourceRow key={s.id} s={s} slug={slug} setMsg={setMsg} reload={load} runSync={runSync} />
           ))}
         </TableBody>
       </Table>
