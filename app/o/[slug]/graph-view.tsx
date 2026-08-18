@@ -4,10 +4,11 @@ import { ExternalLink, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-r
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchPalette } from "@/components/search-palette";
 
 type Node = { id: string; title: string; date?: string | null; dir: string; tags: string[]; x?: number; y?: number; vx?: number; vy?: number };
 type Edge = { from: string; to: string };
-type Hit = { path: string; title: string; date: string | null; snippet: string };
+type Hit = { path: string; title: string; date: string | null; tags: string[]; snippet: string; marked: string };
 type Tree = { name: string; path: string; folders: Tree[]; docs: Node[]; count: number };
 
 function buildTree(nodes: Node[]): Tree {
@@ -127,6 +128,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
   const [openDoc, setOpenDoc] = useState<{ path: string; title: string } | null>(null);
   const [orgs, setOrgs] = useState<{ slug: string; name: string }[]>([]);
   const [sideOpen, setSideOpen] = useState(true);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const hotRef = useRef<Node | null>(null);
   const openRef = useRef<(path: string, title: string) => void>(() => {});
@@ -146,8 +148,18 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
     return () => removeEventListener("popstate", onPop);
   }, []);
 
+  // ⌘K anywhere in the workspace; the doc iframe forwards its own keystroke as a message.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((v) => !v); }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
+
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
+      if ((e.data as { pnsvPalette?: boolean })?.pnsvPalette) { setPaletteOpen(true); return; }
       const href = (e.data as { pnsvOpen?: string })?.pnsvOpen;
       if (!href) return;
       const m = href.match(/^\/o\/[^/]+\/d(\/.+)$/);
@@ -194,6 +206,9 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
   }, [visible, openDoc]);
 
   const tree = useMemo(() => (graph ? buildTree(graph.nodes) : null), [graph]);
+  const recent = useMemo(() => (graph ? [...graph.nodes]
+    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).slice(0, 12)
+    .map((n) => ({ path: n.id, title: n.title, date: n.date })) : []), [graph]);
   const outs = openDoc && graph ? graph.edges.filter((e) => e.from === openDoc.path)
     .map((e) => graph.nodes.find((n) => n.id === e.to)).filter(Boolean) as Node[] : [];
   const ins = openDoc && graph ? graph.edges.filter((e) => e.to === openDoc.path)
@@ -242,6 +257,9 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
+
+      <SearchPalette slug={slug} open={paletteOpen} onOpenChange={setPaletteOpen}
+        recent={recent} onOpen={(p, t) => openRef.current(p, t)} />
 
       <aside style={{ width: sideOpen ? 320 : 0, minWidth: sideOpen ? 270 : 0, overflow: "hidden",
         borderRight: sideOpen ? "1px solid var(--rule)" : "none", display: "flex", flexDirection: "column",
@@ -383,7 +401,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
             )}
             <canvas ref={cvRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
             <div className="mono" style={{ position: "absolute", right: 16, bottom: 12, fontSize: 10.5, color: "var(--ink-3)" }}>
-              drag to pan · click node to open{filter ? ` · filtered: ${filter}` : ""}
+              drag to pan · click node to open · ⌘K search{filter ? ` · filtered: ${filter}` : ""}
             </div>
           </div>
         )}

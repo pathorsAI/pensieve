@@ -49,6 +49,12 @@ function navScript(slug: string, here: string, embed: boolean) {
         const a = t?.closest?.(`a[href^="/o/"]`) as HTMLAnchorElement | null;
         if (a) { ev.preventDefault(); parent.postMessage({ pnsvOpen: a.getAttribute("href") }, "*"); }
       });
+      // keystrokes inside the iframe never reach the workspace shell — forward ⌘K
+      document.addEventListener("keydown", (ev) => {
+        if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") {
+          ev.preventDefault(); parent.postMessage({ pnsvPalette: true }, "*");
+        }
+      });
     }
     if (!embed) {
       const pill = document.createElement("a");
