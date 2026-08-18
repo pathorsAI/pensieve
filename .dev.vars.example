@@ -1,0 +1,9 @@
+DATABASE_URL=postgresql://...
+BETTER_AUTH_SECRET=generate-with-openssl-rand
+BETTER_AUTH_URL=http://localhost:3000
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+# GitHub App (optional, for repo sync)
+GITHUB_APP_ID=
+GITHUB_APP_PRIVATE_KEY=   # PKCS#8 PEM: openssl pkcs8 -topk8 -nocrypt -in app.pem
+GITHUB_APP_WEBHOOK_SECRET=

@@ -1,0 +1,10 @@
+{
+  "name": "pensieve",
+  "main": ".open-next/worker.js",
+  "account_id": "f24490803f04493935495abca0e411d3",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "routes": [{ "pattern": "pensieve.pathors.com", "custom_domain": true }],
+  "vars": { "BETTER_AUTH_URL": "https://pensieve.pathors.com" }
+}
