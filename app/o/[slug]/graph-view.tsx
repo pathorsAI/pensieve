@@ -1,5 +1,9 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ExternalLink, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Node = { id: string; title: string; date?: string | null; dir: string; tags: string[]; x?: number; y?: number; vx?: number; vy?: number };
 type Edge = { from: string; to: string };
@@ -239,30 +243,35 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
   return (
     <div style={{ display: "flex", height: "100vh" }}>
       {!sideOpen && (
-        <button onClick={() => setSideOpen(true)} title="開啟側欄"
-          style={{ position: "fixed", top: 12, left: 12, zIndex: 40, border: "1px solid var(--rule)",
-            background: "var(--paper-2)", color: "var(--ink)", borderRadius: 8, padding: "6px 9px", fontSize: 14 }}>☰</button>
+        <Button variant="outline" size="icon" onClick={() => setSideOpen(true)} title="開啟側欄"
+          className="fixed top-3 left-3 z-40 size-8">
+          <PanelLeftOpen className="size-4" />
+        </Button>
       )}
       <aside style={{ width: sideOpen ? 320 : 0, minWidth: sideOpen ? 270 : 0, overflow: "hidden",
         borderRight: sideOpen ? "1px solid var(--rule)" : "none", display: "flex", flexDirection: "column",
         transition: "width .18s ease, min-width .18s ease" }}>
-        <div style={{ padding: "14px 14px 12px", borderBottom: "1px solid var(--rule)",
-          display: "flex", alignItems: "center", gap: 8 }}>
-          <select value={slug} onChange={(e) => { if (e.target.value !== slug) location.href = `/o/${e.target.value}`; }}
-            style={{ flex: 1, fontFamily: "var(--serif)", fontSize: 16, fontWeight: 600, color: "var(--ink)",
-              background: "var(--paper-2)", border: "1px solid var(--rule)", borderRadius: 8, padding: "7px 10px" }}>
-            {(orgs.length ? orgs : [{ slug, name: orgName }]).map((o) => (
-              <option key={o.slug} value={o.slug}>{o.name}</option>
-            ))}
-          </select>
-          <button onClick={() => setSideOpen(false)} title="收合側欄"
-            style={{ border: "1px solid var(--rule)", background: "var(--paper)", color: "var(--ink-3)",
-              borderRadius: 8, padding: "6px 9px", fontSize: 13 }}>⟨</button>
+        <div className="flex items-center gap-1.5 border-b px-2.5 py-2.5" style={{ borderColor: "var(--rule)" }}>
+          <Select value={slug} onValueChange={(v) => { if (v !== slug) location.href = `/o/${v}`; }}>
+            <SelectTrigger className="flex-1 h-8 text-sm font-medium">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(orgs.length ? orgs : [{ slug, name: orgName }]).map((o) => (
+                <SelectItem key={o.slug} value={o.slug}>{o.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="ghost" size="icon" onClick={() => setSideOpen(false)} title="收合側欄" className="size-8 shrink-0">
+            <PanelLeftClose className="size-4" />
+          </Button>
         </div>
-        <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--rule-soft)" }}>
-          <input style={{ width: "100%", padding: "8px 11px", border: "1px solid var(--rule)",
-            background: "var(--paper-2)", color: "var(--ink)", borderRadius: 6, fontSize: 13.5, outline: "none" }}
-            placeholder="搜尋全文、標題、標籤…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="border-b px-2.5 py-2.5" style={{ borderColor: "var(--rule-soft)" }}>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5" style={{ color: "var(--ink-3)" }} />
+            <Input className="h-8 pl-8 text-sm" placeholder="搜尋全文、標題、標籤…"
+              value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
         </div>
         {filter && (
           <div style={{ padding: "8px 18px", borderBottom: "1px solid var(--rule-soft)", fontSize: 12.5 }}>
@@ -324,11 +333,13 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
               <span style={{ fontFamily: "var(--serif)", fontSize: 15.5, color: "var(--ink)", flex: 1,
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{openDoc.title}</span>
               <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{openDoc.path}</span>
-              <a href={`/o/${slug}/d${openDoc.path}`} target="_blank" rel="noreferrer"
-                style={{ fontSize: 12.5, color: "var(--accent-2)", textDecoration: "none" }}>開新分頁 ↗</a>
-              <button onClick={() => history.back()} title="關閉"
-                style={{ border: "1px solid var(--rule)", background: "var(--paper)", color: "var(--ink)",
-                  borderRadius: 6, padding: "3px 10px", fontSize: 13, cursor: "pointer" }}>✕</button>
+              <a href={`/o/${slug}/d${openDoc.path}`} target="_blank" rel="noreferrer">
+                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
+                  <ExternalLink className="size-3.5" /> 開新分頁</Button>
+              </a>
+              <Button variant="ghost" size="icon" onClick={() => history.back()} title="關閉" className="size-7">
+                <X className="size-4" />
+              </Button>
             </div>
             <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
               <iframe key={openDoc.path} src={`/o/${slug}/d${openDoc.path}?embed=1`}
