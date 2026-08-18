@@ -6,7 +6,7 @@ export function extractMeta(html: string) {
   const tags = (pick(/<meta\s+name="tags"\s+content="([^"]+)"/i) ?? "")
     .split(",").map((t) => t.trim()).filter(Boolean);
   const links = [...new Set(
-    [...html.matchAll(/href="(\/[^"#?]+?)(?:\.html)?"/g)].map((m) => m[1].replace(/\/$/, ""))
+    [...html.matchAll(/href="(\/[^"#?]+?)(?:\.(?:html|md))?"/g)].map((m) => m[1].replace(/\/$/, ""))
   )];
   return { title, date, tags, links };
 }

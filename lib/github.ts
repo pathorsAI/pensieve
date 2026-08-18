@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "./db";
 import * as schema from "./schema";
 import { extractMeta, plainText } from "./extract";
+import { mdToHtml } from "./markdown";
 
 const b64url = (buf: ArrayBuffer | Uint8Array) =>
   btoa(String.fromCharCode(...new Uint8Array(buf as ArrayBuffer)))
@@ -45,15 +46,16 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
 
   const folder = (source.folder ?? "").replace(/^\/|\/$/g, "");
   const prefix = folder ? folder + "/" : "";
-  const files = tree.filter((t) => t.type === "blob" && t.path.startsWith(prefix) && t.path.endsWith(".html"));
+  const files = tree.filter((t) => t.type === "blob" && t.path.startsWith(prefix) && (t.path.endsWith(".html") || t.path.endsWith(".md")));
 
   const mount = source.mount === "/" ? "" : source.mount.replace(/\/$/, "");
   const seen: string[] = [];
   for (const f of files) {
     const raw = await gh(`https://api.github.com/repos/${source.repo}/git/blobs/${f.sha}`);
     const blob = await raw.json() as { content: string };
-    const html = new TextDecoder().decode(Uint8Array.from(atob(blob.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
-    const rel = "/" + f.path.slice(prefix.length).replace(/\.html$/, "");
+    const raw2 = new TextDecoder().decode(Uint8Array.from(atob(blob.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
+    const html = f.path.endsWith(".md") ? mdToHtml(raw2) : raw2;
+    const rel = "/" + f.path.slice(prefix.length).replace(/\.(html|md)$/, "");
     const path = mount + rel;
     const meta = extractMeta(html);
     seen.push(path);

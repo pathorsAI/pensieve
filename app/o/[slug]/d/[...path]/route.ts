@@ -4,7 +4,8 @@ import * as schema from "@/lib/schema";
 import { requireMember } from "@/lib/access";
 
 // Serves a document's HTML with the pensieve nav (pill + backlinks) injected.
-export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; path: string[] }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ slug: string; path: string[] }> }) {
+  const embed = new URL(req.url).searchParams.get("embed") === "1";
   const { slug, path } = await ctx.params;
   const access = await requireMember(slug);
   if (!access) return new Response("forbidden", { status: 403 });
@@ -13,15 +14,15 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
     eq(schema.document.organizationId, access.org.id), eq(schema.document.path, docPath))).limit(1);
   if (!rows.length) return new Response("not found", { status: 404 });
 
-  const nav = `<script>(${navScript.toString()})(${JSON.stringify(slug)},${JSON.stringify(docPath)})</script>`;
+  const nav = `<script>(${navScript.toString()})(${JSON.stringify(slug)},${JSON.stringify(docPath)},${embed})</script>`;
   let html = rows[0].html;
   // in-workspace links resolve through the org prefix
-  html = html.replace(/href="(\/[^"#?]+?)(?:\.html)?"/g, (_m, p) => `href="/o/${slug}/d${p}"`);
+  html = html.replace(/href="(\/[^"#?]+?)(?:\.(?:html|md))?"/g, (_m, p) => `href="/o/${slug}/d${p}"`);
   html = html.includes("</body>") ? html.replace("</body>", nav + "</body>") : html + nav;
   return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
-function navScript(slug: string, here: string) {
+function navScript(slug: string, here: string, embed: boolean) {
   (async () => {
     let g: { nodes: { id: string; title: string }[]; edges: { from: string; to: string }[] };
     try { g = await (await fetch(`/api/graph?org=${slug}`)).json(); } catch { return; }
@@ -32,9 +33,18 @@ function navScript(slug: string, here: string) {
     const st = document.createElement("style");
     st.textContent = ".pnsv-pill{position:fixed;top:14px;left:14px;z-index:9999;font:11px/1 ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;text-decoration:none;padding:7px 12px;border-radius:999px;background:rgba(20,26,27,.82);color:#F1F2F0;opacity:.55;transition:opacity .15s}.pnsv-pill:hover{opacity:1}@media (prefers-color-scheme:dark){.pnsv-pill{background:rgba(228,232,231,.14);color:#E4E8E7}}.pnsv-links{max-width:900px;margin:48px auto 0;padding:20px 24px 8px;border-top:1px solid rgba(127,138,137,.35);font-family:-apple-system,'PingFang TC',sans-serif}.pnsv-links h4{font:10.5px/1 ui-monospace,Menlo,monospace;letter-spacing:.14em;text-transform:uppercase;opacity:.55;margin:14px 0 8px}.pnsv-links a{display:inline-block;margin:0 10px 8px 0;font-size:13.5px;text-decoration:none;color:inherit;opacity:.8;border-bottom:1px solid rgba(127,138,137,.5)}.pnsv-links a:hover{opacity:1}";
     document.head.appendChild(st);
-    const pill = document.createElement("a");
-    pill.className = "pnsv-pill"; pill.href = `/o/${slug}`; pill.textContent = "◉ pensieve";
-    document.body.appendChild(pill);
+    if (embed) {
+      document.addEventListener("click", (ev) => {
+        const t = ev.target as HTMLElement | null;
+        const a = t?.closest?.(`a[href^="/o/"]`) as HTMLAnchorElement | null;
+        if (a) { ev.preventDefault(); parent.postMessage({ pnsvOpen: a.getAttribute("href") }, "*"); }
+      });
+    }
+    if (!embed) {
+      const pill = document.createElement("a");
+      pill.className = "pnsv-pill"; pill.href = `/o/${slug}`; pill.textContent = "◉ pensieve";
+      document.body.appendChild(pill);
+    }
     if (outs.length || ins.length) {
       const box = document.createElement("div");
       box.className = "pnsv-links";

@@ -35,6 +35,34 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const cvRef = useRef<HTMLCanvasElement>(null);
   const hotRef = useRef<Node | null>(null);
+  const [openDoc, setOpenDoc] = useState<{ path: string; title: string } | null>(null);
+  const openRef = useRef<(path: string, title: string) => void>(() => {});
+  openRef.current = (path, title) => { history.pushState({ doc: path }, "", `#${path}`); setOpenDoc({ path, title }); };
+
+  useEffect(() => {
+    const onPop = () => setOpenDoc(null);
+    addEventListener("popstate", onPop);
+    if (location.hash.startsWith("#/")) {
+      const p = location.hash.slice(1);
+      setOpenDoc({ path: p, title: p.split("/").pop() ?? p });
+    }
+    return () => removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const href = (e.data as { pnsvOpen?: string })?.pnsvOpen;
+      if (!href) return;
+      const m = href.match(/^\/o\/[^/]+\/d(\/.+)$/);
+      if (!m) return;
+      const path = m[1];
+      const title = graph?.nodes.find((n) => n.id === path)?.title ?? path;
+      history.replaceState({ doc: path }, "", `#${path}`);
+      setOpenDoc({ path, title });
+    };
+    addEventListener("message", onMsg);
+    return () => removeEventListener("message", onMsg);
+  }, [graph]);
 
   useEffect(() => { fetch(`/api/graph?org=${slug}`).then((r) => r.json()).then(setGraph); }, [slug]);
 
@@ -115,7 +143,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
         moved += Math.abs(e.clientX - lx) + Math.abs(e.clientY - ly); lx = e.clientX; ly = e.clientY; return; }
       const n = at(e); hotRef.current = n ?? null; cv.style.cursor = n ? "pointer" : "default"; };
     const up = (e: PointerEvent) => { const was = dragging; dragging = false;
-      if (was && moved < 6) { const n = at(e); if (n) location.href = `/o/${slug}/d${n.id}`; } };
+      if (was && moved < 6) { const n = at(e); if (n) openRef.current(n.id, n.title); } };
     cv.addEventListener("pointerdown", down); addEventListener("pointermove", move); addEventListener("pointerup", up);
     return () => { cancelAnimationFrame(raf); removeEventListener("resize", resize);
       cv.removeEventListener("pointerdown", down); removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
@@ -142,7 +170,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
         <div>
           {t.folders.map((f) => <Folder key={f.path} t={f} depth={depth + 1} />)}
           {t.docs.map((n) => (
-            <a key={n.id} href={`/o/${slug}/d${n.id}`} style={{ display: "block",
+            <a key={n.id} href={`/o/${slug}/d${n.id}`} onClick={(e) => { e.preventDefault(); openRef.current(n.id, n.title); }} style={{ display: "block",
               padding: `6px 18px 6px ${34 + depth * 14}px`, textDecoration: "none",
               color: "var(--ink-2)", fontSize: 13.5, lineHeight: 1.35 }}>
               {n.title}
@@ -180,7 +208,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
             <div>
               <div className="sub" style={{ padding: "14px 18px 4px" }}>search · {hits.length}</div>
               {hits.map((h) => (
-                <a key={h.path} href={`/o/${slug}/d${h.path}`} style={{ display: "block", padding: "8px 18px",
+                <a key={h.path} href={`/o/${slug}/d${h.path}`} onClick={(e) => { e.preventDefault(); openRef.current(h.path, h.title); }} style={{ display: "block", padding: "8px 18px",
                   textDecoration: "none", color: "var(--ink-2)", fontSize: 13.5, lineHeight: 1.4 }}>
                   {h.title}
                   <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.45 }}>{h.snippet}</div>
@@ -199,7 +227,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
             <div style={{ paddingTop: 6 }}>
               {tree.folders.map((f) => <Folder key={f.path} t={f} depth={0} />)}
               {tree.docs.map((n) => (
-                <a key={n.id} href={`/o/${slug}/d${n.id}`} style={{ display: "block", padding: "6px 18px",
+                <a key={n.id} href={`/o/${slug}/d${n.id}`} onClick={(e) => { e.preventDefault(); openRef.current(n.id, n.title); }} style={{ display: "block", padding: "6px 18px",
                   textDecoration: "none", color: "var(--ink-2)", fontSize: 13.5 }}>
                   {n.title}
                   <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginLeft: 7 }}>{n.date}</span>
@@ -216,6 +244,23 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
           drag to pan · click node to open{filter ? ` · filtered: ${filter}` : ""}
         </div>
       </main>
+      {openDoc && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", flexDirection: "column",
+          background: "var(--paper)", animation: "pnsvFade .16s ease" }}>
+          <style>{`@keyframes pnsvFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }`}</style>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 16px",
+            borderBottom: "1px solid var(--rule)", background: "var(--paper-2)" }}>
+            <button onClick={() => history.back()} style={{ border: "1px solid var(--rule)", background: "var(--paper)",
+              color: "var(--ink)", borderRadius: 6, padding: "4px 12px", fontSize: 13, cursor: "pointer" }}>← 返回</button>
+            <span style={{ fontFamily: "var(--serif)", fontSize: 15, color: "var(--ink)", flex: 1,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{openDoc.title}</span>
+            <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{openDoc.path}</span>
+            <a href={`/o/${slug}/d${openDoc.path}`} target="_blank" rel="noreferrer"
+              style={{ fontSize: 12.5, color: "var(--accent-2)" }}>開新分頁 ↗</a>
+          </div>
+          <iframe src={`/o/${slug}/d${openDoc.path}?embed=1`} style={{ flex: 1, border: 0, width: "100%" }} />
+        </div>
+      )}
     </div>
   );
 }

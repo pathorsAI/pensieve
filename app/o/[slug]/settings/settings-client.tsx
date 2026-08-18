@@ -1,5 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Check, ChevronsUpDown, ExternalLink, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 type Source = { id: string; repo: string | null; branch: string | null; folder: string | null; mount: string; lastSyncAt: string | null };
 type Installation = { installationId: string; account: string; repos: { fullName: string; defaultBranch: string }[] };
@@ -9,6 +17,7 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
   const [insts, setInsts] = useState<Installation[] | null>(null);
   const [appMissing, setAppMissing] = useState(false);
   const [appSlug, setAppSlug] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const [repo, setRepo] = useState("");
   const [branch, setBranch] = useState("main");
   const [folder, setFolder] = useState("");
@@ -25,75 +34,97 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
 
   const allRepos = (insts ?? []).flatMap((i) => i.repos.map((r) => ({ ...r, installationId: i.installationId })));
   const chosen = allRepos.find((r) => r.fullName === repo);
+  const installUrl = appSlug ? `https://github.com/apps/${appSlug}/installations/new` : null;
+
+  const runSync = async (syncId: string) => {
+    setMsg("syncing…");
+    const r = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ org: slug, syncId }) });
+    const d = await r.json(); setMsg(d.error ? `✗ ${d.error}` : `✓ 已同步 ${d.synced} 份`); load();
+  };
 
   return (
     <main className="page">
-      <div className="sub"><a href={`/o/${slug}`} style={{ textDecoration: "none" }}>← {orgName}</a></div>
+      <div className="sub"><a href={`/o/${slug}`} className="no-underline">← {orgName}</a></div>
       <h1>Sync sources</h1>
-      <p style={{ color: "var(--ink-3)", fontSize: 13.5, lineHeight: 1.7, maxWidth: 640, margin: "6px 0 18px" }}>
+      <p className="text-sm leading-relaxed max-w-xl mb-5" style={{ color: "var(--ink-3)" }}>
         Git 是唯一的資料來源：把 repo（或其中一個 folder）掛進來，push 之後 webhook 自動同步。
-        Pensieve 這邊唯讀——沒有上傳、沒有反向寫回。
+        支援 <code className="mono">.html</code> 與 <code className="mono">.md</code>。Pensieve 唯讀，不寫回。
       </p>
 
-      {appMissing && <div className="card">GitHub App 未設定（缺 GITHUB_APP_* secrets）。</div>}
+      {appMissing && <Card className="mb-4"><CardContent className="pt-4 text-sm">GitHub App 未設定（缺 GITHUB_APP_* secrets）。</CardContent></Card>}
+
       {insts && !appMissing && !allRepos.length && (
-        <div className="card">
-          <div style={{ marginBottom: 10 }}>還沒有可用的 repo——先把 GitHub App 裝到你的帳號或 org，安裝頁上就能勾選 repo。</div>
-          {appSlug && (
-            <a href={`https://github.com/apps/${appSlug}/installations/new`} target="_blank" rel="noreferrer">
-              <button className="primary">Install GitHub App →</button>
-            </a>
-          )}
-          <span style={{ marginLeft: 10, fontSize: 12.5, color: "var(--ink-3)" }}>裝完回來重新整理這頁</span>
-        </div>
-      )}
-      {allRepos.length > 0 && appSlug && (
-        <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginBottom: 10 }}>
-          要加別的 repo？<a href={`https://github.com/apps/${appSlug}/installations/new`} target="_blank" rel="noreferrer">管理 App 安裝</a>，改完回來重新整理。
-        </p>
+        <Card className="mb-4"><CardContent className="pt-4 flex items-center gap-3 text-sm">
+          <span>還沒有可用的 repo——先把 GitHub App 裝到你的帳號或 org，安裝頁上就能勾選 repo。</span>
+          {installUrl && <a href={installUrl} target="_blank" rel="noreferrer">
+            <Button>Install GitHub App <ExternalLink className="size-3.5" /></Button></a>}
+        </CardContent></Card>
       )}
 
       {allRepos.length > 0 && (
-        <div className="row" style={{ marginBottom: 8 }}>
-          <select value={repo} onChange={(e) => { setRepo(e.target.value);
-            const r = allRepos.find((x) => x.fullName === e.target.value);
-            if (r) setBranch(r.defaultBranch); }}>
-            <option value="">選 repo…</option>
-            {allRepos.map((r) => <option key={r.fullName} value={r.fullName}>{r.fullName}</option>)}
-          </select>
-          <input placeholder="branch" style={{ width: 90 }} value={branch} onChange={(e) => setBranch(e.target.value)} />
-          <input placeholder="folder（空＝整個 repo）" style={{ width: 180 }} value={folder} onChange={(e) => setFolder(e.target.value)} />
-          <input placeholder="mount" style={{ width: 90 }} value={mount} onChange={(e) => setMount(e.target.value)} />
-          <button className="primary" disabled={!chosen} onClick={async () => {
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" role="combobox" className="w-[280px] justify-between font-normal">
+                {repo || "選 repo…"}
+                <ChevronsUpDown className="size-3.5 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[280px] p-0">
+              <Command>
+                <CommandInput placeholder="搜尋 repo…" />
+                <CommandList>
+                  <CommandEmpty>找不到。</CommandEmpty>
+                  <CommandGroup>
+                    {allRepos.map((r) => (
+                      <CommandItem key={r.fullName} value={r.fullName} onSelect={(v) => {
+                        setRepo(v); setBranch(r.defaultBranch); setOpen(false); }}>
+                        <Check className={cn("size-3.5", repo === r.fullName ? "opacity-100" : "opacity-0")} />
+                        {r.fullName}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+          <Input className="w-24" placeholder="branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
+          <Input className="w-44" placeholder="folder（空＝整個 repo）" value={folder} onChange={(e) => setFolder(e.target.value)} />
+          <Input className="w-24" placeholder="mount" value={mount} onChange={(e) => setMount(e.target.value)} />
+          <Button disabled={!chosen} onClick={async () => {
             setMsg("adding…");
             const r = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
               body: JSON.stringify({ org: slug, repo, branch, folder, mount, installationId: chosen!.installationId }) });
             const d = await r.json();
-            if (d.id) { setMsg("syncing…");
-              const s = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
-                body: JSON.stringify({ org: slug, syncId: d.id }) });
-              const sd = await s.json(); setMsg(sd.error ? `✗ ${sd.error}` : `✓ 已同步 ${sd.synced} 份`); }
-            load();
-          }}>Add + sync</button>
+            if (d.id) await runSync(d.id); else load();
+          }}>Add + sync</Button>
         </div>
       )}
+      {allRepos.length > 0 && installUrl && (
+        <p className="text-xs mb-4" style={{ color: "var(--ink-3)" }}>
+          要加別的 repo？<a className="underline" href={installUrl} target="_blank" rel="noreferrer">管理 App 安裝</a>，改完回來重新整理。
+        </p>
+      )}
 
-      <table className="t"><thead><tr><th>repo</th><th>folder</th><th>mount</th><th>last sync</th><th></th></tr></thead>
-        <tbody>{sources.map((s) => (
-          <tr key={s.id}>
-            <td className="mono" style={{ fontSize: 12 }}>{s.repo}@{s.branch}</td>
-            <td className="mono" style={{ fontSize: 12 }}>{s.folder || "/"}</td>
-            <td className="mono" style={{ fontSize: 12 }}>{s.mount}</td>
-            <td className="mono" style={{ fontSize: 11 }}>{s.lastSyncAt?.slice(0, 16) ?? "never"}</td>
-            <td><button onClick={async () => {
-              setMsg("syncing…");
-              const r = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
-                body: JSON.stringify({ org: slug, syncId: s.id }) });
-              const d = await r.json(); setMsg(d.error ? `✗ ${d.error}` : `✓ 已同步 ${d.synced} 份`); load();
-            }}>Sync now</button></td>
-          </tr>))}</tbody>
-      </table>
-      <p style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 6 }}>{msg}</p>
+      <Table>
+        <TableHeader><TableRow>
+          <TableHead>repo</TableHead><TableHead>folder</TableHead><TableHead>mount</TableHead>
+          <TableHead>last sync</TableHead><TableHead /></TableRow></TableHeader>
+        <TableBody>
+          {sources.map((s) => (
+            <TableRow key={s.id}>
+              <TableCell className="mono text-xs">{s.repo}@{s.branch}</TableCell>
+              <TableCell className="mono text-xs">{s.folder || "/"}</TableCell>
+              <TableCell className="mono text-xs">{s.mount}</TableCell>
+              <TableCell className="mono text-[11px]">{s.lastSyncAt?.slice(0, 16) ?? "never"}</TableCell>
+              <TableCell><Button variant="outline" size="sm" onClick={() => runSync(s.id)}>
+                <RefreshCw className="size-3.5" /> Sync now</Button></TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <p className="text-sm mt-2" style={{ color: "var(--ink-3)" }}>{msg}</p>
     </main>
   );
 }
