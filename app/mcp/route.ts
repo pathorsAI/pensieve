@@ -27,6 +27,15 @@ const result = (id: Id, value: unknown) => json({ jsonrpc: "2.0", id, result: va
 const failure = (id: Id, code: number, message: string, status = 200) =>
   json({ jsonrpc: "2.0", id, error: { code, message } }, status);
 
+// tools/call, lifted out of the switch: name + argument shape, then dispatch.
+async function toolsCall(id: Id, params: Record<string, unknown>, userId: string): Promise<Response> {
+  const name = typeof params.name === "string" ? params.name : "";
+  if (!name) return failure(id, -32602, "Missing tool name");
+  const args = (params.arguments ?? {}) as Record<string, unknown>;
+  if (typeof args !== "object" || Array.isArray(args)) return failure(id, -32602, "`arguments` must be an object");
+  return result(id, await callTool(name, args, { userId }));
+}
+
 // Only the subject matters here; the plugin already verified signature, issuer,
 // audience and expiry against the JWKS.
 async function handler(req: Request, claims: { sub?: unknown }): Promise<Response> {
@@ -66,13 +75,8 @@ async function handler(req: Request, claims: { sub?: unknown }): Promise<Respons
       return result(id, {});
     case "tools/list":
       return result(id, { tools: toolDescriptors });
-    case "tools/call": {
-      const name = typeof params.name === "string" ? params.name : "";
-      if (!name) return failure(id, -32602, "Missing tool name");
-      const args = (params.arguments ?? {}) as Record<string, unknown>;
-      if (typeof args !== "object" || Array.isArray(args)) return failure(id, -32602, "`arguments` must be an object");
-      return result(id, await callTool(name, args, { userId }));
-    }
+    case "tools/call":
+      return toolsCall(id, params, userId);
     default:
       if (isNotification) return new Response(null, { status: 202, headers: CORS });
       return failure(id, -32601, `Method not found: ${msg.method}`);

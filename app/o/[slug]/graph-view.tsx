@@ -159,6 +159,8 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
 
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
+      // only our own doc iframes may drive the shell — synced HTML can embed third-party frames
+      if (e.origin !== location.origin) return;
       if ((e.data as { pnsvPalette?: boolean })?.pnsvPalette) { setPaletteOpen(true); return; }
       const href = (e.data as { pnsvOpen?: string })?.pnsvOpen;
       if (!href) return;

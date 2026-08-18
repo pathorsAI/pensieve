@@ -16,7 +16,7 @@ type Params = Promise<Record<string, string | string[] | undefined>>;
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
-export default async function Consent({ searchParams }: { searchParams: Params }) {
+export default async function Consent({ searchParams }: Readonly<{ searchParams: Params }>) {
   const sp = await searchParams;
   const clientId = one(sp.client_id) ?? "";
   const scopes = (one(sp.scope) ?? "").split(" ").filter(Boolean);

@@ -24,7 +24,8 @@ const docUrl = (slug: string, path: string) => `${BASE}/o/${slug}/d${path}`;
 
 /** Documents are keyed by extension-less absolute paths; accept the sloppy forms too. */
 function normalizePath(raw: string): string {
-  const s = ("/" + String(raw).trim()).replace(/\/+/g, "/").replace(/\.(html|md)$/i, "").replace(/\/+$/, "");
+  // Runs of slashes are already collapsed, so the trailing check needs no quantifier to backtrack over.
+  const s = ("/" + String(raw).trim()).replace(/\/+/g, "/").replace(/\.(html|md)$/i, "").replace(/\/$/, "");
   return s || "/";
 }
 
@@ -68,6 +69,44 @@ async function resolveWorkspace(ctx: ToolContext, slug?: string): Promise<Worksp
 const fmtMeta = (d: { date: string | null; tags: string[] }) =>
   [d.date, d.tags.length ? d.tags.map((t) => `#${t}`).join(" ") : null].filter(Boolean).join("  ");
 
+type DocRow = { path: string; title: string; date: string | null; tags: string[] };
+
+/** One document as a listing entry: heading, optional meta, optional snippet, canonical URL. */
+function fmtEntry(slug: string, d: DocRow, snippet?: string): string {
+  const meta = fmtMeta(d);
+  return [
+    `${d.title}  [${d.path}]`,
+    meta ? `  ${meta}` : null,
+    snippet === undefined ? null : `  ${snippet}`,
+    `  ${docUrl(slug, d.path)}`,
+  ].filter(Boolean).join("\n");
+}
+
+const workspaceArg = {
+  type: "string",
+  description: "Workspace slug. Optional when the user has exactly one workspace.",
+};
+
+/** The two path-addressed tools take the same arguments and differ only in how they describe `path`. */
+const pathInputSchema = (pathDescription: string) => ({
+  type: "object",
+  properties: { workspace: workspaceArg, path: { type: "string", description: pathDescription } },
+  required: ["path"],
+  additionalProperties: false,
+});
+
+/** Order matters: `path` is checked before the workspace, so a missing path outranks an ambiguous workspace. */
+async function resolveDocArgs(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<{ ws: Workspace; path: string }> {
+  const raw = str(args, "path");
+  if (!raw) throw new ToolError("`path` is required");
+  const path = normalizePath(raw);
+  const ws = await resolveWorkspace(ctx, str(args, "workspace"));
+  return { ws, path };
+}
+
 export const tools: Tool[] = [
   {
     name: "list_workspaces",
@@ -84,9 +123,12 @@ export const tools: Tool[] = [
         .from(schema.document)
         .where(inArray(schema.document.organizationId, all.map((w) => w.id)))
         .groupBy(schema.document.organizationId);
-      const byOrg = new Map(counts.map((c) => [c.orgId, c.n]));
+      const byOrg = new Map<string, number>(counts.map((c) => [c.orgId, c.n]));
       return all
-        .map((w) => `${w.slug} — ${w.name} (${byOrg.get(w.id) ?? 0} documents)\n  ${BASE}/o/${w.slug}`)
+        .map((w) => {
+          const n = byOrg.get(w.id) ?? 0;
+          return `${w.slug} — ${w.name} (${n} documents)\n  ${BASE}/o/${w.slug}`;
+        })
         .join("\n");
     },
   },
@@ -100,7 +142,7 @@ export const tools: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        workspace: { type: "string", description: "Workspace slug. Optional when the user has exactly one workspace." },
+        workspace: workspaceArg,
         query: { type: "string", description: "Search terms. Plain words, not a boolean expression." },
         limit: { type: "integer", description: "Maximum hits to return (default 10, max 50)." },
       },
@@ -113,14 +155,7 @@ export const tools: Tool[] = [
       const ws = await resolveWorkspace(ctx, str(args, "workspace"));
       const hits = await searchDocuments(ws.id, query, { limit: int(args, "limit", 10, 50) });
       if (!hits.length) return `No documents in ${ws.slug} match "${query}".`;
-      return hits
-        .map((h) => [
-          `${h.title}  [${h.path}]`,
-          fmtMeta(h) && `  ${fmtMeta(h)}`,
-          `  ${h.snippet}`,
-          `  ${docUrl(ws.slug, h.path)}`,
-        ].filter(Boolean).join("\n"))
-        .join("\n\n");
+      return hits.map((h) => fmtEntry(ws.slug, h, h.snippet)).join("\n\n");
     },
   },
   {
@@ -129,20 +164,9 @@ export const tools: Tool[] = [
     description:
       "Return the full plain text of one document, addressed by the path that search_documents / list_documents report. " +
       "A leading slash and an .html/.md suffix are both optional. Long documents are truncated and say so.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        workspace: { type: "string", description: "Workspace slug. Optional when the user has exactly one workspace." },
-        path: { type: "string", description: 'Document path, e.g. "/meetings/2026-08-18-retro".' },
-      },
-      required: ["path"],
-      additionalProperties: false,
-    },
+    inputSchema: pathInputSchema('Document path, e.g. "/meetings/2026-08-18-retro".'),
     async run(args, ctx) {
-      const raw = str(args, "path");
-      if (!raw) throw new ToolError("`path` is required");
-      const path = normalizePath(raw);
-      const ws = await resolveWorkspace(ctx, str(args, "workspace"));
+      const { ws, path } = await resolveDocArgs(args, ctx);
       const rows = await db
         .select()
         .from(schema.document)
@@ -167,7 +191,7 @@ export const tools: Tool[] = [
     inputSchema: {
       type: "object",
       properties: {
-        workspace: { type: "string", description: "Workspace slug. Optional when the user has exactly one workspace." },
+        workspace: workspaceArg,
         prefix: { type: "string", description: 'Path prefix to restrict to, e.g. "/meetings".' },
         tag: { type: "string", description: "Only documents carrying this tag." },
         limit: { type: "integer", description: "Maximum documents to return (default 50, max 200)." },
@@ -187,10 +211,10 @@ export const tools: Tool[] = [
         .where(and(...where))
         .orderBy(sql`${schema.document.date} desc nulls last`, schema.document.path)
         .limit(int(args, "limit", 50, 200));
-      if (!rows.length) return `No documents in ${ws.slug}${prefix ? ` under ${prefix}` : ""}${tag ? ` tagged #${tag}` : ""}.`;
-      return rows
-        .map((r) => `${r.title}  [${r.path}]${fmtMeta(r) ? `\n  ${fmtMeta(r)}` : ""}\n  ${docUrl(ws.slug, r.path)}`)
-        .join("\n\n");
+      const underPrefix = prefix ? ` under ${prefix}` : "";
+      const taggedWith = tag ? ` tagged #${tag}` : "";
+      if (!rows.length) return `No documents in ${ws.slug}${underPrefix}${taggedWith}.`;
+      return rows.map((r) => fmtEntry(ws.slug, r)).join("\n\n");
     },
   },
   {
@@ -199,20 +223,9 @@ export const tools: Tool[] = [
     description:
       "Walk Pensieve's link graph one hop from a document: the documents it links to, and the documents that link back to it. " +
       "Use it after read_document to pick up the surrounding context a search query would have missed.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        workspace: { type: "string", description: "Workspace slug. Optional when the user has exactly one workspace." },
-        path: { type: "string", description: "Document path to walk from." },
-      },
-      required: ["path"],
-      additionalProperties: false,
-    },
+    inputSchema: pathInputSchema("Document path to walk from."),
     async run(args, ctx) {
-      const raw = str(args, "path");
-      if (!raw) throw new ToolError("`path` is required");
-      const path = normalizePath(raw);
-      const ws = await resolveWorkspace(ctx, str(args, "workspace"));
+      const { ws, path } = await resolveDocArgs(args, ctx);
       const self = await db
         .select({ links: schema.document.links, title: schema.document.title })
         .from(schema.document)

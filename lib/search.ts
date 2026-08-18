@@ -4,12 +4,13 @@ import { db } from "./db";
 export type Hit = {
   path: string; title: string; date: string | null; tags: string[];
   snippet: string;      // plain text, no markup
-  marked: string;       // same snippet, matched terms wrapped in \x02…\x03
+  marked: string;       // same snippet, matched terms wrapped in SEL_A…SEL_B
   score: number;
 };
 
-const SEL_A = "\u0002";
-const SEL_B = "\u0003";
+// Private-use sentinels around matched terms — kept in sync with components/search-palette.tsx.
+const SEL_A = "\uE000";
+const SEL_B = "\uE001";
 const HEADLINE = `StartSel=${SEL_A}, StopSel=${SEL_B}, MaxWords=35, MinWords=15, ShortWord=3, HighlightAll=false`;
 const CJK = /[㐀-鿿぀-ヿ가-힯]/;
 const WINDOW = 170, LEAD = 60;
@@ -20,14 +21,14 @@ type Row = {
   hl?: boolean | null;
 };
 
-const strip = (s: string) => s.replace(/[\u0002\u0003]/g, "");
+const strip = (s: string) => s.replace(/[\uE000\uE001]/g, "");
 const esc = (s: string) => s.replace(/[%_\\]/g, (m) => "\\" + m);
 
 /** Wrap literal occurrences of the query terms — ts_headline can't do CJK with the english config. */
 function markLiteral(text: string, q: string) {
   const terms = q.split(/\s+/).filter(Boolean).sort((a, b) => b.length - a.length);
   if (!terms.length) return text;
-  const re = new RegExp(terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "gi");
+  const re = new RegExp(terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)).join("|"), "gi");
   return text.replace(re, (m) => SEL_A + m + SEL_B);
 }
 
@@ -35,9 +36,10 @@ function toHits(rows: Row[], q: string): Hit[] {
   return rows.map((r) => {
     const raw = r.snip ?? "";
     const pos = Number(r.pos ?? 0);
+    const lead = pos > LEAD ? "…" : "";
+    const tail = raw.length >= WINDOW ? "…" : "";
     // ts_headline already marked the FTS rows; the substring windows still need it.
-    const marked = r.hl ? raw
-      : (pos > LEAD ? "…" : "") + markLiteral(raw, q) + (raw.length >= WINDOW ? "…" : "");
+    const marked = r.hl ? raw : lead + markLiteral(raw, q) + tail;
     return {
       path: r.path, title: r.title, date: r.date,
       tags: Array.isArray(r.tags) ? r.tags : [],

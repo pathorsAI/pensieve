@@ -6,24 +6,33 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 export type PaletteHit = { path: string; title: string; date: string | null; marked: string };
 export type PaletteDoc = { path: string; title: string; date?: string | null };
 
-/** Renders the \x02…\x03 markers searchDocuments returns, without trusting them as markup. */
-function Marked({ text }: { text: string }) {
+// Private-use sentinels around matched terms — kept in sync with lib/search.ts.
+const SEL_A = "\uE000";
+const SEL_B = "\uE001";
+const SPLIT = new RegExp(`[${SEL_A}${SEL_B}]`);
+
+/** Renders the SEL_A…SEL_B markers searchDocuments returns, without trusting them as markup. */
+function Marked({ text }: Readonly<{ text: string }>) {
+  let offset = 0;
   return (
     <>
-      {text.split(/[\u0002\u0003]/).map((s, i) =>
-        i % 2 ? (
-          <span key={i} style={{ color: "var(--accent-2)", background: "var(--accent-wash)", borderRadius: 2 }}>{s}</span>
+      {text.split(SPLIT).map((s, i) => {
+        const key = `${offset}-${s}`;
+        offset += s.length + 1; // the sentinel that split them
+        return i % 2 ? (
+          <span key={key} style={{ color: "var(--accent-2)", background: "var(--accent-wash)", borderRadius: 2 }}>{s}</span>
         ) : (
-          <span key={i}>{s}</span>
-        ))}
+          <span key={key}>{s}</span>
+        );
+      })}
     </>
   );
 }
 
-export function SearchPalette({ slug, open, onOpenChange, recent, onOpen }: {
+export function SearchPalette({ slug, open, onOpenChange, recent, onOpen }: Readonly<{
   slug: string; open: boolean; onOpenChange: (v: boolean) => void;
   recent: PaletteDoc[]; onOpen: (path: string, title: string) => void;
-}) {
+}>) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<PaletteHit[] | null>(null);
 
