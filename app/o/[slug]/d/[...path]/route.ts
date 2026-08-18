@@ -47,7 +47,14 @@ function navScript(slug: string, here: string, embed: boolean) {
       document.addEventListener("click", (ev) => {
         const t = ev.target as HTMLElement | null;
         const a = t?.closest?.(`a[href^="/o/"]`) as HTMLAnchorElement | null;
-        if (a) { ev.preventDefault(); parent.postMessage({ pnsvOpen: a.getAttribute("href") }, "*"); }
+        // same-origin iframe: address the workspace shell explicitly, never "*"
+        if (a) { ev.preventDefault(); parent.postMessage({ pnsvOpen: a.getAttribute("href") }, location.origin); }
+      });
+      // keystrokes inside the iframe never reach the workspace shell — forward ⌘K
+      document.addEventListener("keydown", (ev) => {
+        if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") {
+          ev.preventDefault(); parent.postMessage({ pnsvPalette: true }, location.origin);
+        }
       });
     }
     if (!embed) {
