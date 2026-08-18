@@ -25,14 +25,15 @@ export function mdToHtml(src: string): string {
 ${meta.date ? `<meta name="date" content="${meta.date}">` : ""}
 ${meta.tags ? `<meta name="tags" content="${meta.tags}">` : ""}
 <style>
-:root{--paper:#F7F9FB;--ink:#141A1B;--ink-2:#3D4849;--ink-3:#6B7778;--rule:#D5DCE3;
+:root{color-scheme:light;--paper:#F7F9FB;--ink:#141A1B;--ink-2:#3D4849;--ink-3:#6B7778;--rule:#D5DCE3;
   --accent:#2456B3;--wash:#E8EFFA;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang TC","Noto Sans TC",sans-serif;
   --serif:"Iowan Old Style",Palatino,Georgia,"Songti TC",serif;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-@media (prefers-color-scheme:dark){:root{--paper:#0F1417;--ink:#E4E8E7;--ink-2:#B2BCBB;
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;--paper:#0F1417;--ink:#E4E8E7;--ink-2:#B2BCBB;
   --ink-3:#7E8A89;--rule:#2A3438;--accent:#7FA8F0;--wash:#16233A}}
-*{margin:0;padding:0;box-sizing:border-box}
+*{margin:0;padding:0;box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--rule) transparent}
+*::-webkit-scrollbar{width:8px;height:8px}*::-webkit-scrollbar-track{background:transparent}*::-webkit-scrollbar-thumb{background:var(--rule);border-radius:8px}
 html,body{background:var(--paper);color:var(--ink)}
 body{font-family:var(--sans);line-height:1.7;font-size:16px;-webkit-font-smoothing:antialiased}
 .wrap{max-width:820px;margin:0 auto;padding:56px 24px 96px}

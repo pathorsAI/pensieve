@@ -31,6 +31,7 @@
    Legacy vars (--paper/--ink/--accent…) are used by the graph view and doc
    templates; the shadcn set feeds components. Both defined here, both themes. */
 :root {
+  color-scheme: light;
   /* legacy */
   --paper:#F7F9FB; --paper-2:#EDF1F6; --ink:#13181D; --ink-2:#3A444E; --ink-3:#68737E;
   --rule:#D5DCE3; --rule-soft:#E2E8EE; --accent:#2456B3; --accent-2:#3E77E0; --accent-wash:#E8EFFA;
@@ -52,6 +53,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
     --paper:#0F1417; --paper-2:#161D23; --ink:#E4E8EA; --ink-2:#B2BCC4; --ink-3:#7E8A94;
     --rule:#2A3440; --rule-soft:#1F2831; --accent:#7FA8F0; --accent-2:#9FBEF5; --accent-wash:#16233A;
     --risk:#D4736F; --risk-bg:#2E1A19;
@@ -80,3 +82,10 @@ table.t { border-collapse: collapse; width: 100%; font-size: 13.5px; }
 table.t th { font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
   color: var(--ink-3); text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); }
 table.t td { padding: 8px 10px; border-bottom: 1px solid var(--rule-soft); color: var(--ink-2); }
+
+/* slim, theme-matched scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
