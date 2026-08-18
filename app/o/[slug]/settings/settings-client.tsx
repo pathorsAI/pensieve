@@ -8,6 +8,7 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
   const [sources, setSources] = useState<Source[]>([]);
   const [insts, setInsts] = useState<Installation[] | null>(null);
   const [appMissing, setAppMissing] = useState(false);
+  const [appSlug, setAppSlug] = useState<string | null>(null);
   const [repo, setRepo] = useState("");
   const [branch, setBranch] = useState("main");
   const [folder, setFolder] = useState("");
@@ -17,7 +18,7 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
   const load = () => {
     fetch(`/api/sources?org=${slug}`).then((r) => r.json()).then((d) => setSources(d.sources ?? []));
     fetch("/api/github/installations").then((r) => r.json()).then((d) => {
-      setInsts(d.installations ?? []); setAppMissing(!!d.appMissing);
+      setInsts(d.installations ?? []); setAppMissing(!!d.appMissing); setAppSlug(d.appSlug ?? null);
     });
   };
   useEffect(load, [slug]);
@@ -37,8 +38,19 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
       {appMissing && <div className="card">GitHub App 未設定（缺 GITHUB_APP_* secrets）。</div>}
       {insts && !appMissing && !allRepos.length && (
         <div className="card">
-          App 還沒被安裝到任何 repo。到 GitHub App 頁面 Install，勾選要同步的 repo 後回來重新整理。
+          <div style={{ marginBottom: 10 }}>還沒有可用的 repo——先把 GitHub App 裝到你的帳號或 org，安裝頁上就能勾選 repo。</div>
+          {appSlug && (
+            <a href={`https://github.com/apps/${appSlug}/installations/new`} target="_blank" rel="noreferrer">
+              <button className="primary">Install GitHub App →</button>
+            </a>
+          )}
+          <span style={{ marginLeft: 10, fontSize: 12.5, color: "var(--ink-3)" }}>裝完回來重新整理這頁</span>
         </div>
+      )}
+      {allRepos.length > 0 && appSlug && (
+        <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginBottom: 10 }}>
+          要加別的 repo？<a href={`https://github.com/apps/${appSlug}/installations/new`} target="_blank" rel="noreferrer">管理 App 安裝</a>，改完回來重新整理。
+        </p>
       )}
 
       {allRepos.length > 0 && (

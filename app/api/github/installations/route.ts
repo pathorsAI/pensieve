@@ -14,6 +14,8 @@ export async function GET() {
 
   const jwt = await appJwt();
   const gh = { Accept: "application/vnd.github+json", "User-Agent": "pensieve" };
+  const appRes = await fetch("https://api.github.com/app", { headers: { ...gh, Authorization: `Bearer ${jwt}` } });
+  const appSlug = appRes.ok ? (await appRes.json() as { slug: string }).slug : null;
   const res = await fetch("https://api.github.com/app/installations", {
     headers: { ...gh, Authorization: `Bearer ${jwt}` } });
   if (!res.ok) return NextResponse.json({ error: `github ${res.status}` }, { status: 502 });
@@ -31,5 +33,5 @@ export async function GET() {
     out.push({ installationId: String(inst.id), account: inst.account.login,
       repos: list.map((r) => ({ fullName: r.full_name, defaultBranch: r.default_branch })) });
   }
-  return NextResponse.json({ installations: out });
+  return NextResponse.json({ installations: out, appSlug });
 }
