@@ -1,13 +1,38 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Node = { id: string; title: string; date?: string | null; dir: string; tags: string[]; x?: number; y?: number; vx?: number; vy?: number };
 type Edge = { from: string; to: string };
+type Hit = { path: string; title: string; date: string | null; snippet: string };
+type Tree = { name: string; path: string; folders: Tree[]; docs: Node[]; count: number };
+
+function buildTree(nodes: Node[]): Tree {
+  const root: Tree = { name: "", path: "", folders: [], docs: [], count: 0 };
+  for (const n of nodes) {
+    const parts = n.id.split("/").filter(Boolean);
+    let cur = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = "/" + parts.slice(0, i + 1).join("/");
+      let next = cur.folders.find((f) => f.path === p);
+      if (!next) { next = { name: parts[i], path: p, folders: [], docs: [], count: 0 }; cur.folders.push(next); }
+      cur = next;
+    }
+    cur.docs.push(n);
+  }
+  const count = (t: Tree): number => (t.count = t.docs.length + t.folders.reduce((s, f) => s + count(f), 0));
+  count(root);
+  const sortRec = (t: Tree) => { t.folders.sort((a, b) => a.name.localeCompare(b.name));
+    t.docs.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")); t.folders.forEach(sortRec); };
+  sortRec(root);
+  return root;
+}
 
 export function GraphView({ slug, orgName, role }: { slug: string; orgName: string; role: string }) {
   const [graph, setGraph] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const [q, setQ] = useState("");
-  const [hits, setHits] = useState<{ path: string; title: string; date: string | null; snippet: string }[] | null>(null);
+  const [hits, setHits] = useState<Hit[] | null>(null);
+  const [filter, setFilter] = useState<string | null>(null);   // folder path prefix
+  const [closed, setClosed] = useState<Record<string, boolean>>({});
   const cvRef = useRef<HTMLCanvasElement>(null);
   const hotRef = useRef<Node | null>(null);
 
@@ -22,9 +47,18 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
     return () => clearTimeout(t);
   }, [q, slug]);
 
+  const visible = useMemo(() => {
+    if (!graph) return null;
+    const pref = filter ? filter + "/" : null;
+    const nodes = pref ? graph.nodes.filter((n) => n.id.startsWith(pref)) : graph.nodes;
+    const ids = new Set(nodes.map((n) => n.id));
+    const edges = graph.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
+    return { nodes, edges };
+  }, [graph, filter]);
+
   useEffect(() => {
-    if (!graph || !cvRef.current) return;
-    const nodes = graph.nodes; const edges = graph.edges;
+    if (!visible || !cvRef.current) return;
+    const nodes = visible.nodes, edges = visible.edges;
     const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
     const deg: Record<string, number> = {};
     edges.forEach((e) => { deg[e.from] = (deg[e.from] ?? 0) + 1; deg[e.to] = (deg[e.to] ?? 0) + 1; });
@@ -85,17 +119,44 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
     cv.addEventListener("pointerdown", down); addEventListener("pointermove", move); addEventListener("pointerup", up);
     return () => { cancelAnimationFrame(raf); removeEventListener("resize", resize);
       cv.removeEventListener("pointerdown", down); removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
-  }, [graph, slug]);
+  }, [visible, slug]);
 
-  const f = q.toLowerCase();
-  const shown = (graph?.nodes ?? []).filter((n) => !f || n.title.toLowerCase().includes(f)
-    || n.id.toLowerCase().includes(f) || n.tags.join(",").toLowerCase().includes(f));
-  const groups: Record<string, Node[]> = {};
-  shown.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).forEach((n) => (groups[n.dir] ??= []).push(n));
+  const tree = useMemo(() => (graph ? buildTree(graph.nodes) : null), [graph]);
+
+  const Folder = ({ t, depth }: { t: Tree; depth: number }) => (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: `5px 18px 5px ${18 + depth * 14}px`,
+        cursor: "pointer", userSelect: "none",
+        background: filter === t.path ? "var(--accent-wash)" : undefined }}>
+        <span className="mono" style={{ fontSize: 9, color: "var(--ink-3)", width: 10 }}
+          onClick={() => setClosed((c) => ({ ...c, [t.path]: !c[t.path] }))}>
+          {closed[t.path] ? "▸" : "▾"}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", flex: 1 }}
+          onClick={() => setFilter(filter === t.path ? null : t.path)}>
+          {t.name}
+        </span>
+        <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>{t.count}</span>
+      </div>
+      {!closed[t.path] && (
+        <div>
+          {t.folders.map((f) => <Folder key={f.path} t={f} depth={depth + 1} />)}
+          {t.docs.map((n) => (
+            <a key={n.id} href={`/o/${slug}/d${n.id}`} style={{ display: "block",
+              padding: `6px 18px 6px ${34 + depth * 14}px`, textDecoration: "none",
+              color: "var(--ink-2)", fontSize: 13.5, lineHeight: 1.35 }}>
+              {n.title}
+              <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginLeft: 7 }}>{n.date}</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
-      <aside style={{ width: 320, minWidth: 260, borderRight: "1px solid var(--rule)", display: "flex", flexDirection: "column" }}>
+      <aside style={{ width: 340, minWidth: 280, borderRight: "1px solid var(--rule)", display: "flex", flexDirection: "column" }}>
         <div style={{ padding: "18px 18px 12px", borderBottom: "1px solid var(--rule)" }}>
           <h1 style={{ fontFamily: "var(--serif)", fontSize: 20, fontWeight: 600 }}>{orgName}</h1>
           <div className="sub" style={{ marginTop: 3 }}>
@@ -106,8 +167,14 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
           </div>
         </div>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--rule-soft)" }}>
-          <input style={{ width: "100%" }} placeholder="搜尋標題、標籤…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input style={{ width: "100%" }} placeholder="搜尋全文、標題、標籤…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        {filter && (
+          <div style={{ padding: "8px 18px", borderBottom: "1px solid var(--rule-soft)", fontSize: 12.5 }}>
+            <span className="mono" style={{ color: "var(--accent-2)" }}>圖譜過濾：{filter}</span>
+            <a style={{ marginLeft: 10, cursor: "pointer" }} onClick={() => setFilter(null)}>清除</a>
+          </div>
+        )}
         <nav style={{ flex: 1, overflowY: "auto", padding: "8px 0 20px" }}>
           {hits !== null && (
             <div>
@@ -122,31 +189,31 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
             </div>
           )}
           {hits === null && !graph && <div style={{ padding: 18, color: "var(--ink-3)" }}>loading…</div>}
-          {graph && !graph.nodes.length && (
+          {hits === null && graph && !graph.nodes.length && (
             <div style={{ padding: 18, color: "var(--ink-3)", fontSize: 13.5, lineHeight: 1.6 }}>
               還沒有文件。到 <a href={`/o/${slug}/settings`}>settings</a> 掛一個
               GitHub repo，push 就會自動同步進來。
             </div>
           )}
-          {hits === null && Object.entries(groups).map(([dir, ds]) => (
-            <div key={dir}>
-              <div className="sub" style={{ padding: "14px 18px 4px" }}>{dir}</div>
-              {ds.map((n) => (
-                <a key={n.id} href={`/o/${slug}/d${n.id}`} style={{ display: "block", padding: "8px 18px",
-                  textDecoration: "none", color: "var(--ink-2)", fontSize: 13.5, lineHeight: 1.4 }}>
+          {hits === null && tree && (
+            <div style={{ paddingTop: 6 }}>
+              {tree.folders.map((f) => <Folder key={f.path} t={f} depth={0} />)}
+              {tree.docs.map((n) => (
+                <a key={n.id} href={`/o/${slug}/d${n.id}`} style={{ display: "block", padding: "6px 18px",
+                  textDecoration: "none", color: "var(--ink-2)", fontSize: 13.5 }}>
                   {n.title}
-                  <div className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 1 }}>{n.date}</div>
+                  <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginLeft: 7 }}>{n.date}</span>
                 </a>
               ))}
             </div>
-          ))}
+          )}
         </nav>
       </aside>
       <main style={{ flex: 1, position: "relative",
         background: "radial-gradient(var(--rule-soft) 1px, transparent 1px)", backgroundSize: "26px 26px" }}>
         <canvas ref={cvRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
         <div className="mono" style={{ position: "absolute", right: 16, bottom: 12, fontSize: 10.5, color: "var(--ink-3)" }}>
-          drag to pan · click node to open
+          drag to pan · click node to open{filter ? ` · filtered: ${filter}` : ""}
         </div>
       </main>
     </div>
