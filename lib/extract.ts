@@ -10,3 +10,15 @@ export function extractMeta(html: string) {
   )];
   return { title, date, tags, links };
 }
+
+/** Tag-stripped text for full-text search. */
+export function plainText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&[a-z#0-9]+;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 50000);
+}

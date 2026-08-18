@@ -7,10 +7,20 @@ type Edge = { from: string; to: string };
 export function GraphView({ slug, orgName, role }: { slug: string; orgName: string; role: string }) {
   const [graph, setGraph] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const [q, setQ] = useState("");
+  const [hits, setHits] = useState<{ path: string; title: string; date: string | null; snippet: string }[] | null>(null);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const hotRef = useRef<Node | null>(null);
 
   useEffect(() => { fetch(`/api/graph?org=${slug}`).then((r) => r.json()).then(setGraph); }, [slug]);
+
+  useEffect(() => {
+    if (q.trim().length < 2) { setHits(null); return; }
+    const t = setTimeout(() => {
+      fetch(`/api/search?org=${slug}&q=${encodeURIComponent(q.trim())}`)
+        .then((r) => r.json()).then((d) => setHits(d.hits ?? []));
+    }, 200);
+    return () => clearTimeout(t);
+  }, [q, slug]);
 
   useEffect(() => {
     if (!graph || !cvRef.current) return;
@@ -99,15 +109,26 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
           <input style={{ width: "100%" }} placeholder="搜尋標題、標籤…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <nav style={{ flex: 1, overflowY: "auto", padding: "8px 0 20px" }}>
-          {!graph && <div style={{ padding: 18, color: "var(--ink-3)" }}>loading…</div>}
-          {graph && !graph.nodes.length && (
-            <div style={{ padding: 18, color: "var(--ink-3)", fontSize: 13.5, lineHeight: 1.6 }}>
-              還沒有文件。用 CLI 推上來：<br />
-              <code className="mono" style={{ fontSize: 11 }}>pensieve push --dir docs</code><br />
-              （token 在 settings 產生）
+          {hits !== null && (
+            <div>
+              <div className="sub" style={{ padding: "14px 18px 4px" }}>search · {hits.length}</div>
+              {hits.map((h) => (
+                <a key={h.path} href={`/o/${slug}/d${h.path}`} style={{ display: "block", padding: "8px 18px",
+                  textDecoration: "none", color: "var(--ink-2)", fontSize: 13.5, lineHeight: 1.4 }}>
+                  {h.title}
+                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.45 }}>{h.snippet}</div>
+                </a>
+              ))}
             </div>
           )}
-          {Object.entries(groups).map(([dir, ds]) => (
+          {hits === null && !graph && <div style={{ padding: 18, color: "var(--ink-3)" }}>loading…</div>}
+          {graph && !graph.nodes.length && (
+            <div style={{ padding: 18, color: "var(--ink-3)", fontSize: 13.5, lineHeight: 1.6 }}>
+              還沒有文件。到 <a href={`/o/${slug}/settings`}>settings</a> 掛一個
+              GitHub repo，push 就會自動同步進來。
+            </div>
+          )}
+          {hits === null && Object.entries(groups).map(([dir, ds]) => (
             <div key={dir}>
               <div className="sub" style={{ padding: "14px 18px 4px" }}>{dir}</div>
               {ds.map((n) => (

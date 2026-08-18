@@ -16,6 +16,9 @@ export const auth = betterAuth({
     },
   },
   plugins: [organization()],
+  onAPIError: {
+    onError(e) { console.error("[auth]", e instanceof Error ? e.stack ?? e.message : JSON.stringify(e)); },
+  },
   databaseHooks: {
     user: {
       create: {

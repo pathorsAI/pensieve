@@ -18,11 +18,10 @@ files you can grep.
   `<meta name="date">` and `<meta name="tags">` drive sorting and search.
   Root-relative links between documents (`<a href="/meetings/2026-08-18-retro">`)
   become graph edges. Backlinks are injected automatically on every page.
-- **Sync** — two ways, per workspace, multiple sources each with its own mount
-  prefix:
-  1. **CLI**: `PENSIEVE_TOKEN=… node cli/pensieve.mjs push --dir docs`
-  2. **GitHub App**: install the app on a repo, add it as a sync source
-     (repo / branch / folder / mount); pushes sync automatically via webhook.
+- **Sync** — git is the only source of truth, one way: install the Pensieve
+  GitHub App on a repo, add it as a sync source (repo / branch / folder, each
+  with its own mount prefix, several per workspace); pushes sync automatically
+  via webhook. Pensieve itself is read-only — no uploads, no write-back.
 
 ## Stack
 

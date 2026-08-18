@@ -27,6 +27,7 @@ export const account = pgTable("account", {
   id: text("id").primaryKey(),
   accountId: text("account_id").notNull(),
   providerId: text("provider_id").notNull(),
+  issuer: text("issuer"),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   accessToken: text("access_token"),
   refreshToken: text("refresh_token"),
@@ -73,6 +74,7 @@ export const invitation = pgTable("invitation", {
   role: text("role"),
   status: text("status").notNull().default("pending"),
   expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
   inviterId: text("inviter_id").notNull().references(() => user.id, { onDelete: "cascade" }),
 });
 
@@ -86,19 +88,10 @@ export const document = pgTable("document", {
   tags: jsonb("tags").$type<string[]>().notNull().default([]),
   links: jsonb("links").$type<string[]>().notNull().default([]),
   html: text("html").notNull(),
+  text: text("text").notNull().default(""),  // tag-stripped plain text, for search
   source: text("source").notNull().default("cli"), // mount label of whichever sync wrote it
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [uniqueIndex("document_org_path").on(t.organizationId, t.path)]);
-
-export const apiToken = pgTable("api_token", {
-  id: text("id").primaryKey(),
-  organizationId: text("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
-  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-  name: text("name").notNull(),
-  tokenHash: text("token_hash").notNull().unique(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  lastUsedAt: timestamp("last_used_at"),
-});
 
 export const syncSource = pgTable("sync_source", {
   id: text("id").primaryKey(),

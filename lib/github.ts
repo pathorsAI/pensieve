@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "./db";
 import * as schema from "./schema";
-import { extractMeta } from "./extract";
+import { extractMeta, plainText } from "./extract";
 
 const b64url = (buf: ArrayBuffer | Uint8Array) =>
   btoa(String.fromCharCode(...new Uint8Array(buf as ArrayBuffer)))
@@ -9,7 +9,7 @@ const b64url = (buf: ArrayBuffer | Uint8Array) =>
 
 /** RS256-signed GitHub App JWT. GITHUB_APP_PRIVATE_KEY must be PKCS#8
  *  (convert GitHub's download once: openssl pkcs8 -topk8 -nocrypt -in app.pem). */
-async function appJwt(): Promise<string> {
+export async function appJwt(): Promise<string> {
   const pem = process.env.GITHUB_APP_PRIVATE_KEY!;
   const der = Uint8Array.from(atob(pem.replace(/-----[^-]+-----/g, "").replace(/\s/g, "")), (c) => c.charCodeAt(0));
   const key = await crypto.subtle.importKey("pkcs8", der,
@@ -58,10 +58,10 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
     const meta = extractMeta(html);
     seen.push(path);
     await db.insert(schema.document)
-      .values({ id: crypto.randomUUID(), organizationId: source.organizationId, path, html, source: `github:${source.id}`, ...meta })
+      .values({ id: crypto.randomUUID(), organizationId: source.organizationId, path, html, text: plainText(html), source: `github:${source.id}`, ...meta })
       .onConflictDoUpdate({
         target: [schema.document.organizationId, schema.document.path],
-        set: { html, title: meta.title, date: meta.date, tags: meta.tags, links: meta.links, source: `github:${source.id}`, updatedAt: new Date() },
+        set: { html, text: plainText(html), title: meta.title, date: meta.date, tags: meta.tags, links: meta.links, source: `github:${source.id}`, updatedAt: new Date() },
       });
   }
   // prune docs this source owned that no longer exist in the repo
