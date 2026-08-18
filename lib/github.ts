@@ -46,7 +46,9 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
 
   const folder = (source.folder ?? "").replace(/^\/|\/$/g, "");
   const prefix = folder ? folder + "/" : "";
+  const ASSET_EXT = /\.(css|js|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|pdf)$/i;
   const files = tree.filter((t) => t.type === "blob" && t.path.startsWith(prefix) && (t.path.endsWith(".html") || t.path.endsWith(".md")));
+  const assetFiles = tree.filter((t) => t.type === "blob" && t.path.startsWith(prefix) && ASSET_EXT.test(t.path));
 
   const mount = source.mount === "/" ? "" : source.mount.replace(/\/$/, "");
   const label = `github:${source.id}`;
@@ -71,7 +73,7 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
   if (docs.length) {
     await db.insert(schema.document)
       .values(docs.map((d) => {
-        const meta = extractMeta(d.html);
+        const meta = extractMeta(d.html, d.path);
         return { id: crypto.randomUUID(), organizationId: source.organizationId,
           path: d.path, html: d.html, text: plainText(d.html), source: label, ...meta };
       }))
@@ -84,6 +86,38 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
         },
       });
   }
+  // assets (css/js/images/fonts) ride along so docs' relative references resolve
+  const MIME: Record<string, string> = { css: "text/css", js: "text/javascript", png: "image/png",
+    jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", svg: "image/svg+xml", webp: "image/webp",
+    ico: "image/x-icon", woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", pdf: "application/pdf" };
+  const assets: { path: string; contentType: string; data: string }[] = [];
+  for (let i = 0; i < assetFiles.length; i += chunk) {
+    const part = await Promise.all(assetFiles.slice(i, i + chunk).map(async (f) => {
+      const raw = await gh(`https://api.github.com/repos/${source.repo}/git/blobs/${f.sha}`);
+      const blob = await raw.json() as { content: string };
+      const rel = "/" + f.path.slice(prefix.length);
+      const ext = f.path.split(".").pop()!.toLowerCase();
+      return { path: mount + rel, contentType: MIME[ext] ?? "application/octet-stream", data: blob.content.replace(/\n/g, "") };
+    }));
+    assets.push(...part);
+  }
+  if (assets.length) {
+    await db.insert(schema.asset)
+      .values(assets.map((a) => ({ id: crypto.randomUUID(), organizationId: source.organizationId,
+        path: a.path, contentType: a.contentType, data: a.data, source: label })))
+      .onConflictDoUpdate({
+        target: [schema.asset.organizationId, schema.asset.path],
+        set: { data: sql`excluded.data`, contentType: sql`excluded.content_type`,
+          source: sql`excluded.source`, updatedAt: new Date() },
+      });
+  }
+  const seenAssets = assets.map((a) => a.path);
+  await db.delete(schema.asset).where(and(
+    eq(schema.asset.organizationId, source.organizationId),
+    eq(schema.asset.source, label),
+    seenAssets.length ? notInArray(schema.asset.path, seenAssets) : sql`true`,
+  ));
+
   // prune everything this source owns that is no longer in the repo (or moved mount)
   const seen = docs.map((d) => d.path);
   await db.delete(schema.document).where(and(
@@ -92,7 +126,7 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
     seen.length ? notInArray(schema.document.path, seen) : sql`true`,
   ));
   await db.update(schema.syncSource).set({ lastSyncAt: new Date() }).where(eq(schema.syncSource.id, source.id));
-  return { synced: docs.length };
+  return { synced: docs.length, assets: assets.length };
 }
 
 export async function verifyWebhook(req: Request, body: string): Promise<boolean> {

@@ -121,12 +121,15 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
   const [filter, setFilter] = useState<string | null>(null);
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [openDoc, setOpenDoc] = useState<{ path: string; title: string } | null>(null);
+  const [orgs, setOrgs] = useState<{ slug: string; name: string }[]>([]);
+  const [sideOpen, setSideOpen] = useState(true);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const hotRef = useRef<Node | null>(null);
   const openRef = useRef<(path: string, title: string) => void>(() => {});
   openRef.current = (path, title) => { history.pushState({ doc: path }, "", `#${path}`); setOpenDoc({ path, title }); };
 
   useEffect(() => { fetch(`/api/graph?org=${slug}`).then((r) => r.json()).then(setGraph); }, [slug]);
+  useEffect(() => { fetch("/api/orgs").then((r) => r.json()).then((d) => setOrgs(d.orgs ?? [])); }, []);
 
   useEffect(() => {
     const onPop = () => setOpenDoc(location.hash.startsWith("#/")
@@ -235,17 +238,26 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
-      <aside style={{ width: 320, minWidth: 270, borderRight: "1px solid var(--rule)", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "18px 18px 12px", borderBottom: "1px solid var(--rule)" }}>
-          <h1 style={{ fontFamily: "var(--serif)", fontSize: 20, fontWeight: 600 }}>{orgName}</h1>
-          <div className="sub" style={{ marginTop: 3 }}>
-            <a href={`/o/${slug}`} onClick={(e) => { e.preventDefault(); if (openDoc) history.back(); }}
-              style={{ textDecoration: "none", cursor: "pointer" }}>graph</a>
-            {" · "}
-            <a href={`/o/${slug}/members`} style={{ textDecoration: "none" }}>members</a>
-            {" · "}
-            <a href={`/o/${slug}/settings`} style={{ textDecoration: "none" }}>settings</a>
-          </div>
+      {!sideOpen && (
+        <button onClick={() => setSideOpen(true)} title="開啟側欄"
+          style={{ position: "fixed", top: 12, left: 12, zIndex: 40, border: "1px solid var(--rule)",
+            background: "var(--paper-2)", color: "var(--ink)", borderRadius: 8, padding: "6px 9px", fontSize: 14 }}>☰</button>
+      )}
+      <aside style={{ width: sideOpen ? 320 : 0, minWidth: sideOpen ? 270 : 0, overflow: "hidden",
+        borderRight: sideOpen ? "1px solid var(--rule)" : "none", display: "flex", flexDirection: "column",
+        transition: "width .18s ease, min-width .18s ease" }}>
+        <div style={{ padding: "14px 14px 12px", borderBottom: "1px solid var(--rule)",
+          display: "flex", alignItems: "center", gap: 8 }}>
+          <select value={slug} onChange={(e) => { if (e.target.value !== slug) location.href = `/o/${e.target.value}`; }}
+            style={{ flex: 1, fontFamily: "var(--serif)", fontSize: 16, fontWeight: 600, color: "var(--ink)",
+              background: "var(--paper-2)", border: "1px solid var(--rule)", borderRadius: 8, padding: "7px 10px" }}>
+            {(orgs.length ? orgs : [{ slug, name: orgName }]).map((o) => (
+              <option key={o.slug} value={o.slug}>{o.name}</option>
+            ))}
+          </select>
+          <button onClick={() => setSideOpen(false)} title="收合側欄"
+            style={{ border: "1px solid var(--rule)", background: "var(--paper)", color: "var(--ink-3)",
+              borderRadius: 8, padding: "6px 9px", fontSize: 13 }}>⟨</button>
         </div>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--rule-soft)" }}>
           <input style={{ width: "100%", padding: "8px 11px", border: "1px solid var(--rule)",
@@ -296,6 +308,12 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
             </div>
           )}
         </nav>
+        <div style={{ borderTop: "1px solid var(--rule)", padding: "10px 18px", display: "flex", gap: 16 }}>
+          <a href={`/o/${slug}`} onClick={(e) => { e.preventDefault(); if (openDoc) history.back(); }}
+            className="sub" style={{ textDecoration: "none", cursor: "pointer" }}>graph</a>
+          <a href={`/o/${slug}/members`} className="sub" style={{ textDecoration: "none" }}>members</a>
+          <a href={`/o/${slug}/settings`} className="sub" style={{ textDecoration: "none" }}>settings</a>
+        </div>
       </aside>
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>

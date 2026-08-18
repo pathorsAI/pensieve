@@ -9,7 +9,17 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string; p
   const { slug, path } = await ctx.params;
   const access = await requireMember(slug);
   if (!access) return new Response("forbidden", { status: 403 });
-  const docPath = "/" + path.map(decodeURIComponent).join("/");
+  const rawPath = "/" + path.map(decodeURIComponent).join("/");
+  const docPath = rawPath.replace(/\.(html|md)$/, "");
+  // assets (css/js/images) synced alongside docs are served from the same tree,
+  // so documents' relative references just work.
+  const assetRows = await db.select().from(schema.asset).where(and(
+    eq(schema.asset.organizationId, access.org.id), eq(schema.asset.path, rawPath))).limit(1);
+  if (assetRows.length) {
+    const bytes = Uint8Array.from(atob(assetRows[0].data), (c) => c.charCodeAt(0));
+    return new Response(bytes, { headers: { "content-type": assetRows[0].contentType,
+      "cache-control": "private, max-age=300" } });
+  }
   const rows = await db.select().from(schema.document).where(and(
     eq(schema.document.organizationId, access.org.id), eq(schema.document.path, docPath))).limit(1);
   if (!rows.length) return new Response("not found", { status: 404 });
