@@ -242,12 +242,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
-      {!sideOpen && (
-        <Button variant="outline" size="icon" onClick={() => setSideOpen(true)} title="開啟側欄"
-          className="fixed top-3 left-3 z-40 size-8">
-          <PanelLeftOpen className="size-4" />
-        </Button>
-      )}
+
       <aside style={{ width: sideOpen ? 320 : 0, minWidth: sideOpen ? 270 : 0, overflow: "hidden",
         borderRight: sideOpen ? "1px solid var(--rule)" : "none", display: "flex", flexDirection: "column",
         transition: "width .18s ease, min-width .18s ease" }}>
@@ -330,6 +325,11 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 16px",
               borderBottom: "1px solid var(--rule)", background: "var(--paper-2)" }}>
+              {!sideOpen && (
+                <Button variant="ghost" size="icon" onClick={() => setSideOpen(true)} title="開啟側欄" className="size-7 -ml-1">
+                  <PanelLeftOpen className="size-4" />
+                </Button>
+              )}
               <span style={{ fontFamily: "var(--serif)", fontSize: 15.5, color: "var(--ink)", flex: 1,
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{openDoc.title}</span>
               <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{openDoc.path}</span>
@@ -375,6 +375,12 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
         ) : (
           <div style={{ flex: 1, position: "relative",
             background: "radial-gradient(var(--rule-soft) 1px, transparent 1px)", backgroundSize: "26px 26px" }}>
+            {!sideOpen && (
+              <Button variant="outline" size="icon" onClick={() => setSideOpen(true)} title="開啟側欄"
+                className="absolute top-3 left-3 z-10 size-8">
+                <PanelLeftOpen className="size-4" />
+              </Button>
+            )}
             <canvas ref={cvRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
             <div className="mono" style={{ position: "absolute", right: 16, bottom: 12, fontSize: 10.5, color: "var(--ink-3)" }}>
               drag to pan · click node to open{filter ? ` · filtered: ${filter}` : ""}
