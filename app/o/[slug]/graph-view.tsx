@@ -273,7 +273,16 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
               ))}
             </div>
           )}
-          {hits === null && !graph && <div style={{ padding: 18, color: "var(--ink-3)" }}>loading…</div>}
+          {hits === null && !graph && (
+            <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+              {[80, 62, 71, 55, 66, 48].map((w, i) => (
+                <div key={i} style={{ height: 13, width: `${w}%`, borderRadius: 4,
+                  background: "var(--accent-wash)", animation: "pnsvPulse 1.4s ease-in-out infinite",
+                  animationDelay: `${i * 0.12}s` }} />
+              ))}
+              <style>{`@keyframes pnsvPulse { 0%,100% { opacity: .45 } 50% { opacity: 1 } }`}</style>
+            </div>
+          )}
           {hits === null && graph && !graph.nodes.length && (
             <div style={{ padding: 18, color: "var(--ink-3)", fontSize: 13.5, lineHeight: 1.6 }}>
               還沒有文件。到 <a href={`/o/${slug}/settings`}>settings</a> 掛一個

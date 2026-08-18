@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, notInArray, sql } from "drizzle-orm";
 import { db } from "./db";
 import * as schema from "./schema";
 import { extractMeta, plainText } from "./extract";
@@ -49,33 +49,50 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
   const files = tree.filter((t) => t.type === "blob" && t.path.startsWith(prefix) && (t.path.endsWith(".html") || t.path.endsWith(".md")));
 
   const mount = source.mount === "/" ? "" : source.mount.replace(/\/$/, "");
-  const seen: string[] = [];
-  for (const f of files) {
-    const raw = await gh(`https://api.github.com/repos/${source.repo}/git/blobs/${f.sha}`);
-    const blob = await raw.json() as { content: string };
-    const raw2 = new TextDecoder().decode(Uint8Array.from(atob(blob.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
-    const html = f.path.endsWith(".md") ? mdToHtml(raw2) : raw2;
-    const rel = "/" + f.path.slice(prefix.length).replace(/\.(html|md)$/, "");
-    const path = mount + rel;
-    const meta = extractMeta(html);
-    seen.push(path);
+  const label = `github:${source.id}`;
+
+  // fetch blobs with bounded concurrency, then write in TWO queries total —
+  // per-row writes blow through Workers' subrequest budget on large repos
+  // and used to kill the prune halfway.
+  const docs: { path: string; html: string }[] = [];
+  const chunk = 8;
+  for (let i = 0; i < files.length; i += chunk) {
+    const part = await Promise.all(files.slice(i, i + chunk).map(async (f) => {
+      const raw = await gh(`https://api.github.com/repos/${source.repo}/git/blobs/${f.sha}`);
+      const blob = await raw.json() as { content: string };
+      const src = new TextDecoder().decode(Uint8Array.from(atob(blob.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
+      const html = f.path.endsWith(".md") ? mdToHtml(src) : src;
+      const rel = "/" + f.path.slice(prefix.length).replace(/\.(html|md)$/, "");
+      return { path: mount + rel, html };
+    }));
+    docs.push(...part);
+  }
+
+  if (docs.length) {
     await db.insert(schema.document)
-      .values({ id: crypto.randomUUID(), organizationId: source.organizationId, path, html, text: plainText(html), source: `github:${source.id}`, ...meta })
+      .values(docs.map((d) => {
+        const meta = extractMeta(d.html);
+        return { id: crypto.randomUUID(), organizationId: source.organizationId,
+          path: d.path, html: d.html, text: plainText(d.html), source: label, ...meta };
+      }))
       .onConflictDoUpdate({
         target: [schema.document.organizationId, schema.document.path],
-        set: { html, text: plainText(html), title: meta.title, date: meta.date, tags: meta.tags, links: meta.links, source: `github:${source.id}`, updatedAt: new Date() },
+        set: {
+          html: sql`excluded.html`, text: sql`excluded.text`, title: sql`excluded.title`,
+          date: sql`excluded.date`, tags: sql`excluded.tags`, links: sql`excluded.links`,
+          source: sql`excluded.source`, updatedAt: new Date(),
+        },
       });
   }
-  // prune docs this source owned that no longer exist in the repo
-  const owned = await db.select().from(schema.document)
-    .where(eq(schema.document.organizationId, source.organizationId));
-  for (const d of owned) {
-    if (d.source === `github:${source.id}` && !seen.includes(d.path)) {
-      await db.delete(schema.document).where(eq(schema.document.id, d.id));
-    }
-  }
+  // prune everything this source owns that is no longer in the repo (or moved mount)
+  const seen = docs.map((d) => d.path);
+  await db.delete(schema.document).where(and(
+    eq(schema.document.organizationId, source.organizationId),
+    eq(schema.document.source, label),
+    seen.length ? notInArray(schema.document.path, seen) : sql`true`,
+  ));
   await db.update(schema.syncSource).set({ lastSyncAt: new Date() }).where(eq(schema.syncSource.id, source.id));
-  return { synced: seen.length };
+  return { synced: docs.length };
 }
 
 export async function verifyWebhook(req: Request, body: string): Promise<boolean> {

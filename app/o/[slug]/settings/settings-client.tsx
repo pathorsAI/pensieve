@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Check, ChevronsUpDown, ExternalLink, RefreshCw } from "lucide-react";
+import { Check, ChevronsUpDown, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -11,8 +12,8 @@ import { cn } from "@/lib/utils";
 
 type Source = { id: string; repo: string | null; branch: string | null; folder: string | null; mount: string; lastSyncAt: string | null };
 
-function SourceRow({ s, slug, setMsg, reload, runSync }: {
-  s: Source; slug: string; setMsg: (m: string) => void; reload: () => void; runSync: (id: string) => void;
+function SourceRow({ s, slug, setMsg, reload, runSync, busy }: {
+  s: Source; slug: string; setMsg: (m: string) => void; reload: () => void; runSync: (id: string) => void; busy: string | null;
 }) {
   const [branch, setBranch] = useState(s.branch ?? "main");
   const [folder, setFolder] = useState(s.folder ?? "");
@@ -34,8 +35,8 @@ function SourceRow({ s, slug, setMsg, reload, runSync }: {
             const d = await r.json(); setMsg(d.error ? `✗ ${d.error}` : `✓ 已改設定並重新同步 ${d.synced} 份`); reload();
           }}>Save + resync</Button>
         ) : (
-          <Button variant="outline" size="sm" onClick={() => runSync(s.id)}>
-            <RefreshCw className="size-3.5" /> Sync</Button>
+          <Button variant="outline" size="sm" disabled={busy === s.id} onClick={() => runSync(s.id)}>
+            {busy === s.id ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} Sync</Button>
         )}
         <Button variant="ghost" size="sm" className="ml-1" style={{ color: "var(--risk)" }} onClick={async () => {
           if (!confirm(`移除 ${s.repo}？它同步進來的文件會一併刪除（repo 本身不動）。`)) return;
@@ -60,6 +61,7 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
   const [folder, setFolder] = useState("");
   const [mount, setMount] = useState("/");
   const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
 
   const load = () => {
     fetch(`/api/sources?org=${slug}`).then((r) => r.json()).then((d) => setSources(d.sources ?? []));
@@ -74,10 +76,10 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
   const installUrl = appSlug ? `https://github.com/apps/${appSlug}/installations/new` : null;
 
   const runSync = async (syncId: string) => {
-    setMsg("syncing…");
+    setBusy(syncId); setMsg("syncing…");
     const r = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ org: slug, syncId }) });
-    const d = await r.json(); setMsg(d.error ? `✗ ${d.error}` : `✓ 已同步 ${d.synced} 份`); load();
+    const d = await r.json(); setMsg(d.error ? `✗ ${d.error}` : `✓ 已同步 ${d.synced} 份`); setBusy(null); load();
   };
 
   return (
@@ -89,6 +91,11 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
         支援 <code className="mono">.html</code> 與 <code className="mono">.md</code>。Pensieve 唯讀，不寫回。
       </p>
 
+      {insts === null && (
+        <div className="flex flex-col gap-2 mb-4">
+          <Skeleton className="h-9 w-[420px]" /><Skeleton className="h-9 w-[340px]" />
+        </div>
+      )}
       {appMissing && <Card className="mb-4"><CardContent className="pt-4 text-sm">GitHub App 未設定（缺 GITHUB_APP_* secrets）。</CardContent></Card>}
 
       {insts && !appMissing && !allRepos.length && (
@@ -129,13 +136,14 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
           <Input className="w-24" placeholder="branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
           <Input className="w-44" placeholder="folder（空＝整個 repo）" value={folder} onChange={(e) => setFolder(e.target.value)} />
           <Input className="w-24" placeholder="mount" value={mount} onChange={(e) => setMount(e.target.value)} />
-          <Button disabled={!chosen} onClick={async () => {
-            setMsg("adding…");
+          <Button disabled={!chosen || busy === "add"} onClick={async () => {
+            setBusy("add"); setMsg("adding…");
             const r = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
               body: JSON.stringify({ org: slug, repo, branch, folder, mount, installationId: chosen!.installationId }) });
             const d = await r.json();
             if (d.id) await runSync(d.id); else load();
-          }}>Add + sync</Button>
+            setBusy(null);
+          }}>{busy === "add" ? <Loader2 className="size-3.5 animate-spin" /> : null}Add + sync</Button>
         </div>
       )}
       {allRepos.length > 0 && installUrl && (
@@ -150,7 +158,7 @@ export function SettingsClient({ slug, orgName }: { slug: string; orgName: strin
           <TableHead>mount</TableHead><TableHead>last sync</TableHead><TableHead /></TableRow></TableHeader>
         <TableBody>
           {sources.map((s) => (
-            <SourceRow key={s.id} s={s} slug={slug} setMsg={setMsg} reload={load} runSync={runSync} />
+            <SourceRow key={s.id} s={s} slug={slug} setMsg={setMsg} reload={load} runSync={runSync} busy={busy} />
           ))}
         </TableBody>
       </Table>
