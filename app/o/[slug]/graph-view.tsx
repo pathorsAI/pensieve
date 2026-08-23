@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { ExternalLink, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +51,7 @@ function runSim(cv: HTMLCanvasElement, nodes: Node[], edges: Edge[], opts: {
     cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); };
   resize(); addEventListener("resize", resize);
   const small = !opts.pannable;
+  const maxLabel = small ? 16 : 24;
 
   const loop = () => {
     for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) {
@@ -58,7 +59,7 @@ function runSim(cv: HTMLCanvasElement, nodes: Node[], edges: Edge[], opts: {
       if (d2 < 90000) { const f = (small ? 700 : 1600) / d2; const d = Math.sqrt(d2); dx /= d; dy /= d;
         a.vx! -= dx * f; a.vy! -= dy * f; b.vx! += dx * f; b.vy! += dy * f; } }
     edges.forEach((e) => { const a = byId[e.from], b = byId[e.to]; if (!a || !b) return;
-      const dx = b.x! - a.x!, dy = b.y! - a.y!, d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const dx = b.x! - a.x!, dy = b.y! - a.y!, d = Math.hypot(dx, dy) || 1;
       const f = (d - (small ? 70 : 110)) * 0.004; a.vx! += (dx / d) * f * d; a.vy! += (dy / d) * f * d;
       b.vx! -= (dx / d) * f * d; b.vy! -= (dy / d) * f * d; });
     nodes.forEach((n) => { if (opts.center === n.id) { n.x = 0; n.y = 0; return; }
@@ -69,20 +70,22 @@ function runSim(cv: HTMLCanvasElement, nodes: Node[], edges: Edge[], opts: {
     ctx.clearRect(0, 0, W, H); ctx.save(); ctx.translate(W / 2 + panX, H / 2 + panY);
     ctx.strokeStyle = css("--rule"); ctx.lineWidth = 1;
     edges.forEach((e) => { const a = byId[e.from], b = byId[e.to]; if (!a || !b) return;
-      ctx.globalAlpha = hot && (hot === a || hot === b) ? 1 : hot ? 0.25 : 0.8;
+      let alpha = 0.8;
+      if (hot) alpha = hot === a || hot === b ? 1 : 0.25;
+      ctx.globalAlpha = alpha;
       ctx.beginPath(); ctx.moveTo(a.x!, a.y!); ctx.lineTo(b.x!, b.y!); ctx.stroke(); });
     nodes.forEach((n) => {
       const r = (small ? 4 : 5) + Math.min(9, (deg[n.id] ?? 0) * 1.4);
       const isCenter = opts.center === n.id;
       const linked = hot && edges.some((e) => (e.from === hot.id && e.to === n.id) || (e.to === hot.id && e.from === n.id));
       ctx.globalAlpha = !hot || n === hot || linked ? 1 : 0.3;
-      ctx.fillStyle = isCenter ? css("--accent-2") : n === hot ? css("--accent-2") : css("--accent");
+      ctx.fillStyle = isCenter || n === hot ? css("--accent-2") : css("--accent");
       ctx.beginPath(); ctx.arc(n.x!, n.y!, r, 0, 7); ctx.fill();
       if (isCenter) { ctx.strokeStyle = css("--accent-2"); ctx.globalAlpha = 0.35;
         ctx.beginPath(); ctx.arc(n.x!, n.y!, r + 4, 0, 7); ctx.stroke(); ctx.strokeStyle = css("--rule"); }
       ctx.globalAlpha = !hot || n === hot || linked ? 0.95 : 0.25;
       ctx.fillStyle = css("--ink-2"); ctx.font = (small ? "10.5px " : "11.5px ") + css("--sans");
-      const label = n.title.length > (small ? 16 : 24) ? n.title.slice(0, small ? 15 : 23) + "…" : n.title;
+      const label = n.title.length > maxLabel ? n.title.slice(0, maxLabel - 1) + "…" : n.title;
       ctx.fillText(label, n.x! + r + 5, n.y! + 4); });
     ctx.restore(); ctx.globalAlpha = 1;
     raf = requestAnimationFrame(loop);
@@ -105,13 +108,17 @@ function runSim(cv: HTMLCanvasElement, nodes: Node[], edges: Edge[], opts: {
     cv.removeEventListener("pointerdown", down); removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
 }
 
-function LocalGraph({ center, graph, onOpen }: { center: string; graph: { nodes: Node[]; edges: Edge[] }; onOpen: (n: Node) => void }) {
+function LocalGraph({ center, graph, onOpen }: Readonly<{ center: string; graph: { nodes: Node[]; edges: Edge[] }; onOpen: (n: Node) => void }>) {
   const ref = useRef<HTMLCanvasElement>(null);
   const hotRef = useRef<Node | null>(null);
   useEffect(() => {
     if (!ref.current) return;
     const near = new Set([center]);
-    graph.edges.forEach((e) => { if (e.from === center) near.add(e.to); if (e.to === center) near.add(e.from); });
+    // an edge may touch `center` at either end — both checks are independent
+    graph.edges.forEach((e) => {
+      if (e.from === center) near.add(e.to);
+      if (e.to === center) near.add(e.from);
+    });
     const nodes = graph.nodes.filter((n) => near.has(n.id)).map((n) => ({ ...n }));
     const edges = graph.edges.filter((e) => near.has(e.from) && near.has(e.to));
     return runSim(ref.current, nodes, edges, { center, onOpen, hotRef });
@@ -119,7 +126,79 @@ function LocalGraph({ center, graph, onOpen }: { center: string; graph: { nodes:
   return <canvas ref={ref} style={{ width: "100%", height: "100%", display: "block" }} />;
 }
 
-export function GraphView({ slug, orgName, role }: { slug: string; orgName: string; role: string }) {
+/** `/o/<slug>/d/<path>` — the shape of an in-workspace document link. */
+const DOC_HREF = /^\/o\/[^/]+\/d(\/.+)$/;
+
+type OpenDoc = (path: string, title: string) => void;
+
+function DocLink({ slug, n, depth, active, onOpen }: Readonly<{
+  slug: string; n: Node; depth: number; active: boolean; onOpen: OpenDoc;
+}>) {
+  return (
+    <a href={`/o/${slug}/d${n.id}`} onClick={(e) => { e.preventDefault(); onOpen(n.id, n.title); }}
+      style={{ display: "block", padding: `6px 18px 6px ${20 + depth * 14}px`, textDecoration: "none",
+        color: active ? "var(--accent-2)" : "var(--ink-2)", fontSize: 13.5, lineHeight: 1.35,
+        background: active ? "var(--accent-wash)" : undefined }}>
+      {n.title}
+      <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginLeft: 7 }}>{n.date}</span>
+    </a>
+  );
+}
+
+function RelLink({ slug, n, onOpen }: Readonly<{ slug: string; n: Node; onOpen: OpenDoc }>) {
+  return (
+    <a href={`/o/${slug}/d${n.id}`} onClick={(e) => { e.preventDefault(); onOpen(n.id, n.title); }}
+      style={{ display: "block", padding: "4px 0", textDecoration: "none", color: "var(--ink-2)", fontSize: 13 }}>
+      {n.title}
+    </a>
+  );
+}
+
+/** Collapse arrow and folder name are two separate actions; both are buttons so
+ *  they carry a role and answer to the keyboard, not just to the mouse. */
+const bareButton = { background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left" } as const;
+
+function Folder({ t, depth, slug, filter, setFilter, closed, setClosed, openPath, onOpen }: Readonly<{
+  t: Tree; depth: number; slug: string;
+  filter: string | null; setFilter: Dispatch<SetStateAction<string | null>>;
+  closed: Record<string, boolean>; setClosed: Dispatch<SetStateAction<Record<string, boolean>>>;
+  openPath: string | null; onOpen: OpenDoc;
+}>) {
+  const isClosed = !!closed[t.path];
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: `5px 18px 5px ${18 + depth * 14}px`,
+        cursor: "pointer", userSelect: "none",
+        background: filter === t.path ? "var(--accent-wash)" : undefined }}>
+        <button type="button" className="mono" aria-expanded={!isClosed}
+          aria-label={`${isClosed ? "展開" : "收合"} ${t.name}`}
+          style={{ ...bareButton, fontSize: 9, color: "var(--ink-3)", width: 10 }}
+          onClick={() => setClosed((c) => ({ ...c, [t.path]: !c[t.path] }))}>
+          {isClosed ? "▸" : "▾"}
+        </button>
+        <button type="button"
+          style={{ ...bareButton, fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: "var(--ink)", flex: 1 }}
+          onClick={() => setFilter(filter === t.path ? null : t.path)}>
+          {t.name}
+        </button>
+        <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>{t.count}</span>
+      </div>
+      {!isClosed && (
+        <div>
+          {t.folders.map((f) => (
+            <Folder key={f.path} t={f} depth={depth + 1} slug={slug} filter={filter} setFilter={setFilter}
+              closed={closed} setClosed={setClosed} openPath={openPath} onOpen={onOpen} />
+          ))}
+          {t.docs.map((n) => (
+            <DocLink key={n.id} slug={slug} n={n} depth={depth + 1} active={openPath === n.id} onOpen={onOpen} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgName: string; role: string }>) {
   const [graph, setGraph] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Hit[] | null>(null);
@@ -164,7 +243,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
       if ((e.data as { pnsvPalette?: boolean })?.pnsvPalette) { setPaletteOpen(true); return; }
       const href = (e.data as { pnsvOpen?: string })?.pnsvOpen;
       if (!href) return;
-      const m = href.match(/^\/o\/[^/]+\/d(\/.+)$/);
+      const m = DOC_HREF.exec(href);
       if (!m) return;
       const path = m[1];
       const title = graph?.nodes.find((n) => n.id === path)?.title ?? path;
@@ -216,52 +295,14 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
   const ins = openDoc && graph ? graph.edges.filter((e) => e.to === openDoc.path)
     .map((e) => graph.nodes.find((n) => n.id === e.from)).filter(Boolean) as Node[] : [];
 
-  const Folder = ({ t, depth }: { t: Tree; depth: number }) => (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: `5px 18px 5px ${18 + depth * 14}px`,
-        cursor: "pointer", userSelect: "none",
-        background: filter === t.path ? "var(--accent-wash)" : undefined }}>
-        <span className="mono" style={{ fontSize: 9, color: "var(--ink-3)", width: 10 }}
-          onClick={() => setClosed((c) => ({ ...c, [t.path]: !c[t.path] }))}>
-          {closed[t.path] ? "▸" : "▾"}
-        </span>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", flex: 1 }}
-          onClick={() => setFilter(filter === t.path ? null : t.path)}>
-          {t.name}
-        </span>
-        <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>{t.count}</span>
-      </div>
-      {!closed[t.path] && (
-        <div>
-          {t.folders.map((f) => <Folder key={f.path} t={f} depth={depth + 1} />)}
-          {t.docs.map((n) => <DocLink key={n.id} n={n} depth={depth + 1} />)}
-        </div>
-      )}
-    </div>
-  );
-
-  const DocLink = ({ n, depth }: { n: Node; depth: number }) => (
-    <a href={`/o/${slug}/d${n.id}`} onClick={(e) => { e.preventDefault(); openRef.current(n.id, n.title); }}
-      style={{ display: "block", padding: `6px 18px 6px ${20 + depth * 14}px`, textDecoration: "none",
-        color: openDoc?.path === n.id ? "var(--accent-2)" : "var(--ink-2)", fontSize: 13.5, lineHeight: 1.35,
-        background: openDoc?.path === n.id ? "var(--accent-wash)" : undefined }}>
-      {n.title}
-      <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", marginLeft: 7 }}>{n.date}</span>
-    </a>
-  );
-
-  const RelLink = ({ n }: { n: Node }) => (
-    <a href={`/o/${slug}/d${n.id}`} onClick={(e) => { e.preventDefault(); openRef.current(n.id, n.title); }}
-      style={{ display: "block", padding: "4px 0", textDecoration: "none", color: "var(--ink-2)", fontSize: 13 }}>
-      {n.title}
-    </a>
-  );
+  const open: OpenDoc = (path, title) => openRef.current(path, title);
+  const openPath = openDoc?.path ?? null;
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
 
       <SearchPalette slug={slug} open={paletteOpen} onOpenChange={setPaletteOpen}
-        recent={recent} onOpen={(p, t) => openRef.current(p, t)} />
+        recent={recent} onOpen={open} />
 
       <aside style={{ width: sideOpen ? 320 : 0, minWidth: sideOpen ? 270 : 0, overflow: "hidden",
         borderRight: sideOpen ? "1px solid var(--rule)" : "none", display: "flex", flexDirection: "column",
@@ -291,7 +332,8 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
         {filter && (
           <div style={{ padding: "8px 18px", borderBottom: "1px solid var(--rule-soft)", fontSize: 12.5 }}>
             <span className="mono" style={{ color: "var(--accent-2)" }}>圖譜過濾：{filter}</span>
-            <a style={{ marginLeft: 10, cursor: "pointer", color: "var(--accent-2)" }} onClick={() => setFilter(null)}>清除</a>
+            <button type="button" onClick={() => setFilter(null)}
+              style={{ ...bareButton, marginLeft: 10, font: "inherit", color: "var(--accent-2)" }}>清除</button>
           </div>
         )}
         <nav style={{ flex: 1, overflowY: "auto", padding: "8px 0 20px" }}>
@@ -300,7 +342,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
               <div className="sub" style={{ padding: "14px 18px 4px" }}>search · {hits.length}</div>
               {hits.map((h) => (
                 <a key={h.path} href={`/o/${slug}/d${h.path}`}
-                  onClick={(e) => { e.preventDefault(); openRef.current(h.path, h.title); }}
+                  onClick={(e) => { e.preventDefault(); open(h.path, h.title); }}
                   style={{ display: "block", padding: "8px 18px", textDecoration: "none", color: "var(--ink-2)",
                     fontSize: 13.5, lineHeight: 1.4 }}>
                   {h.title}
@@ -312,7 +354,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
           {hits === null && !graph && (
             <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
               {[80, 62, 71, 55, 66, 48].map((w, i) => (
-                <div key={i} style={{ height: 13, width: `${w}%`, borderRadius: 4,
+                <div key={w} style={{ height: 13, width: `${w}%`, borderRadius: 4,
                   background: "var(--accent-wash)", animation: "pnsvPulse 1.4s ease-in-out infinite",
                   animationDelay: `${i * 0.12}s` }} />
               ))}
@@ -327,8 +369,13 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
           )}
           {hits === null && tree && (
             <div style={{ paddingTop: 6 }}>
-              {tree.folders.map((f) => <Folder key={f.path} t={f} depth={0} />)}
-              {tree.docs.map((n) => <DocLink key={n.id} n={n} depth={0} />)}
+              {tree.folders.map((f) => (
+                <Folder key={f.path} t={f} depth={0} slug={slug} filter={filter} setFilter={setFilter}
+                  closed={closed} setClosed={setClosed} openPath={openPath} onOpen={open} />
+              ))}
+              {tree.docs.map((n) => (
+                <DocLink key={n.id} slug={slug} n={n} depth={0} active={openPath === n.id} onOpen={open} />
+              ))}
             </div>
           )}
         </nav>
@@ -362,7 +409,7 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
               </Button>
             </div>
             <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-              <iframe key={openDoc.path} src={`/o/${slug}/d${openDoc.path}?embed=1`}
+              <iframe key={openDoc.path} title={openDoc.title || openDoc.path} src={`/o/${slug}/d${openDoc.path}?embed=1`}
                 style={{ flex: 1, border: 0, minWidth: 0 }} />
               {graph && (
                 <div style={{ width: 264, borderLeft: "1px solid var(--rule)", display: "flex",
@@ -371,16 +418,16 @@ export function GraphView({ slug, orgName, role }: { slug: string; orgName: stri
                   <div style={{ height: 190, borderBottom: "1px solid var(--rule-soft)",
                     background: "radial-gradient(var(--rule-soft) 1px, transparent 1px)", backgroundSize: "22px 22px" }}>
                     <LocalGraph center={openDoc.path} graph={graph}
-                      onOpen={(n) => openRef.current(n.id, n.title)} />
+                      onOpen={(n) => open(n.id, n.title)} />
                   </div>
                   <div style={{ padding: "10px 16px 20px" }}>
                     {outs.length > 0 && <>
                       <div className="sub" style={{ padding: "8px 0 4px" }}>links to</div>
-                      {outs.map((n) => <RelLink key={n.id} n={n} />)}
+                      {outs.map((n) => <RelLink key={n.id} slug={slug} n={n} onOpen={open} />)}
                     </>}
                     {ins.length > 0 && <>
                       <div className="sub" style={{ padding: "12px 0 4px" }}>linked from</div>
-                      {ins.map((n) => <RelLink key={n.id} n={n} />)}
+                      {ins.map((n) => <RelLink key={n.id} slug={slug} n={n} onOpen={open} />)}
                     </>}
                     {!outs.length && !ins.length && (
                       <div style={{ fontSize: 12.5, color: "var(--ink-3)", paddingTop: 8 }}>

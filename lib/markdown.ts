@@ -6,22 +6,25 @@ import { marked } from "marked";
 export function mdToHtml(src: string): string {
   let meta: Record<string, string> = {};
   let body = src;
-  const fm = src.match(/^---\n([\s\S]*?)\n---\n?/);
+  const fm = /^---\n([\s\S]*?)\n---\n?/.exec(src);
   if (fm) {
     body = src.slice(fm[0].length);
     for (const line of fm[1].split("\n")) {
-      const m = line.match(/^(\w[\w-]*):\s*(.*)$/);
-      if (m) meta[m[1].toLowerCase()] = m[2].trim().replace(/^["']|["']$/g, "");
+      // no trailing $: the greedy .* already runs to the end of this (newline-free) line,
+      // and dropping the anchor removes the \s*/.* backtracking Sonar flags.
+      const m = /^(\w[\w-]*):\s*(.*)/.exec(line);
+      if (m) meta[m[1].toLowerCase()] = m[2].trim().replaceAll(/^["']|["']$/g, "");
     }
   }
-  const title = meta.title ?? body.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? "untitled";
+  // (\S.*) rather than (.+): disjoint from the preceding \s+, so no backtracking.
+  const title = meta.title ?? /^#\s+(\S.*)$/m.exec(body)?.[1]?.trim() ?? "untitled";
   const html = marked.parse(body, { async: false }) as string;
   return `<!doctype html>
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title.replace(/</g, "&lt;")}</title>
+<title>${title.replaceAll("<", "&lt;")}</title>
 ${meta.date ? `<meta name="date" content="${meta.date}">` : ""}
 ${meta.tags ? `<meta name="tags" content="${meta.tags}">` : ""}
 <style>

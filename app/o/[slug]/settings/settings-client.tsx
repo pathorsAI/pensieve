@@ -12,9 +12,9 @@ import { cn } from "@/lib/utils";
 
 type Source = { id: string; repo: string | null; branch: string | null; folder: string | null; mount: string; lastSyncAt: string | null };
 
-function SourceRow({ s, slug, setMsg, reload, runSync, busy }: {
+function SourceRow({ s, slug, setMsg, reload, runSync, busy }: Readonly<{
   s: Source; slug: string; setMsg: (m: string) => void; reload: () => void; runSync: (id: string) => void; busy: string | null;
-}) {
+}>) {
   const [branch, setBranch] = useState(s.branch ?? "main");
   const [folder, setFolder] = useState(s.folder ?? "");
   const [mount, setMount] = useState(s.mount);
@@ -50,7 +50,7 @@ function SourceRow({ s, slug, setMsg, reload, runSync, busy }: {
 }
 type Installation = { installationId: string; account: string; repos: { fullName: string; defaultBranch: string }[] };
 
-export function SettingsClient({ slug, orgName }: { slug: string; orgName: string }) {
+export function SettingsClient({ slug, orgName }: Readonly<{ slug: string; orgName: string }>) {
   const [sources, setSources] = useState<Source[]>([]);
   const [insts, setInsts] = useState<Installation[] | null>(null);
   const [appMissing, setAppMissing] = useState(false);

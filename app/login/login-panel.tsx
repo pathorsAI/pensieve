@@ -14,7 +14,7 @@ export function LoginPanel() {
     // query string. Handing it back verbatim as `oauth_query` is what lets
     // better-auth resume /oauth2/authorize once Google returns — reserialising it
     // would break the signature.
-    const oauthQuery = window.location.search.slice(1);
+    const oauthQuery = globalThis.location.search.slice(1);
     try {
       const res = await fetch("/api/auth/sign-in/social", {
         method: "POST",
@@ -27,7 +27,7 @@ export function LoginPanel() {
       });
       const data = (await res.json()) as { url?: string };
       if (data?.url) {
-        window.location.href = data.url;
+        globalThis.location.href = data.url;
         return;
       }
       throw new Error("no redirect url");

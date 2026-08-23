@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { InviteForm } from "./invite-form";
 
-export default async function Members({ params }: { params: Promise<{ slug: string }> }) {
+export default async function Members({ params }: Readonly<{ params: Promise<{ slug: string }> }>) {
   const { slug } = await params;
   const access = await requireMember(slug);
   if (!access) notFound();
@@ -23,8 +23,8 @@ export default async function Members({ params }: { params: Promise<{ slug: stri
       <Table>
         <TableHeader><TableRow><TableHead>name</TableHead><TableHead>email</TableHead><TableHead>role</TableHead></TableRow></TableHeader>
         <TableBody>
-          {members.map((m, i) => (
-            <TableRow key={i}><TableCell>{m.name}</TableCell><TableCell>{m.email}</TableCell>
+          {members.map((m) => (
+            <TableRow key={m.email}><TableCell>{m.name}</TableCell><TableCell>{m.email}</TableCell>
               <TableCell><Badge variant={m.role === "owner" ? "default" : "secondary"}>{m.role}</Badge></TableCell></TableRow>
           ))}
         </TableBody>

@@ -4,15 +4,19 @@ import * as schema from "./schema";
 import { extractMeta, plainText } from "./extract";
 import { mdToHtml } from "./markdown";
 
-const b64url = (buf: ArrayBuffer | Uint8Array) =>
-  btoa(String.fromCharCode(...new Uint8Array(buf as ArrayBuffer)))
-    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const b64url = (buf: ArrayBuffer | Uint8Array) => {
+  // btoa only ever pads with a run of trailing "=", so trimming it with a loop
+  // is equivalent to /=+$/ without that pattern's backtracking.
+  let s = btoa(String.fromCodePoint(...new Uint8Array(buf as ArrayBuffer)));
+  while (s.endsWith("=")) s = s.slice(0, -1);
+  return s.replaceAll("+", "-").replaceAll("/", "_");
+};
 
 /** RS256-signed GitHub App JWT. GITHUB_APP_PRIVATE_KEY must be PKCS#8
  *  (convert GitHub's download once: openssl pkcs8 -topk8 -nocrypt -in app.pem). */
 export async function appJwt(): Promise<string> {
   const pem = process.env.GITHUB_APP_PRIVATE_KEY!;
-  const der = Uint8Array.from(atob(pem.replace(/-----[^-]+-----/g, "").replace(/\s/g, "")), (c) => c.charCodeAt(0));
+  const der = Uint8Array.from(atob(pem.replaceAll(/-----[^-]+-----/g, "").replaceAll(/\s/g, "")), (c) => c.codePointAt(0)!);
   const key = await crypto.subtle.importKey("pkcs8", der,
     { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
   const now = Math.floor(Date.now() / 1000);
@@ -44,7 +48,7 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
   if (!treeRes.ok) throw new Error(`tree: ${treeRes.status}`);
   const tree = (await treeRes.json() as { tree: { path: string; type: string; sha: string }[] }).tree;
 
-  const folder = (source.folder ?? "").replace(/^\/|\/$/g, "");
+  const folder = (source.folder ?? "").replaceAll(/^\/|\/$/g, "");
   const prefix = folder ? folder + "/" : "";
   const ASSET_EXT = /\.(css|js|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|pdf)$/i;
   const files = tree.filter((t) => t.type === "blob" && t.path.startsWith(prefix) && (t.path.endsWith(".html") || t.path.endsWith(".md")));
@@ -62,7 +66,7 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
     const part = await Promise.all(files.slice(i, i + chunk).map(async (f) => {
       const raw = await gh(`https://api.github.com/repos/${source.repo}/git/blobs/${f.sha}`);
       const blob = await raw.json() as { content: string };
-      const src = new TextDecoder().decode(Uint8Array.from(atob(blob.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
+      const src = new TextDecoder().decode(Uint8Array.from(atob(blob.content.replaceAll("\n", "")), (c) => c.codePointAt(0)!));
       const html = f.path.endsWith(".md") ? mdToHtml(src) : src;
       const rel = "/" + f.path.slice(prefix.length).replace(/\.(html|md)$/, "");
       return { path: mount + rel, html };
@@ -97,7 +101,7 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
       const blob = await raw.json() as { content: string };
       const rel = "/" + f.path.slice(prefix.length);
       const ext = f.path.split(".").pop()!.toLowerCase();
-      return { path: mount + rel, contentType: MIME[ext] ?? "application/octet-stream", data: blob.content.replace(/\n/g, "") };
+      return { path: mount + rel, contentType: MIME[ext] ?? "application/octet-stream", data: blob.content.replaceAll("\n", "") };
     }));
     assets.push(...part);
   }

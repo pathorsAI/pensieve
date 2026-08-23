@@ -42,7 +42,7 @@ export const auth = betterAuth({
     user: {
       create: {
         after: async (u) => {
-          const base = u.email.split("@")[0].toLowerCase().replace(/[^a-z0-9-]/g, "-");
+          const base = u.email.split("@")[0].toLowerCase().replaceAll(/[^a-z0-9-]/g, "-");
           const slug = `${base}-${crypto.randomUUID().slice(0, 4)}`;
           const orgId = crypto.randomUUID();
           await db.insert(schema.organization).values({
