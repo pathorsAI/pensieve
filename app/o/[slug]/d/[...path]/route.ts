@@ -16,7 +16,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string; p
   const assetRows = await db.select().from(schema.asset).where(and(
     eq(schema.asset.organizationId, access.org.id), eq(schema.asset.path, rawPath))).limit(1);
   if (assetRows.length) {
-    const bytes = Uint8Array.from(atob(assetRows[0].data), (c) => c.charCodeAt(0));
+    const bytes = Uint8Array.from(atob(assetRows[0].data), (c) => c.codePointAt(0)!);
     return new Response(bytes, { headers: { "content-type": assetRows[0].contentType,
       "cache-control": "private, max-age=300" } });
   }
@@ -27,7 +27,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string; p
   const nav = `<script>(${navScript.toString()})(${JSON.stringify(slug)},${JSON.stringify(docPath)},${embed})</script>`;
   let html = rows[0].html;
   // in-workspace links resolve through the org prefix
-  html = html.replace(/href="(\/[^"#?]+?)(?:\.(?:html|md))?"/g, (_m, p) => `href="/o/${slug}/d${p}"`);
+  html = html.replaceAll(/href="(\/[^"#?]+?)(?:\.(?:html|md))?"/g, (_m, p) => `href="/o/${slug}/d${p}"`);
   html = html.includes("</body>") ? html.replace("</body>", nav + "</body>") : html + nav;
   return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
 }

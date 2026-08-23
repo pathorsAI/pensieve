@@ -25,11 +25,11 @@ const docUrl = (slug: string, path: string) => `${BASE}/o/${slug}/d${path}`;
 /** Documents are keyed by extension-less absolute paths; accept the sloppy forms too. */
 function normalizePath(raw: string): string {
   // Runs of slashes are already collapsed, so the trailing check needs no quantifier to backtrack over.
-  const s = ("/" + String(raw).trim()).replace(/\/+/g, "/").replace(/\.(html|md)$/i, "").replace(/\/$/, "");
+  const s = ("/" + String(raw).trim()).replaceAll(/\/+/g, "/").replace(/\.(html|md)$/i, "").replace(/\/$/, "");
   return s || "/";
 }
 
-const likeEscape = (s: string) => s.replace(/[%_\\]/g, (m) => "\\" + m);
+const likeEscape = (s: string) => s.replaceAll(/[%_\\]/g, (m) => "\\" + m);
 
 function str(args: Record<string, unknown>, key: string): string | undefined {
   const v = args[key];

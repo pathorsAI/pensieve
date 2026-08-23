@@ -23,7 +23,7 @@ function resolveHref(href: string, docPath: string): string | null {
 
 /** Pull graph metadata out of a document's HTML. docPath enables relative-link resolution. */
 export function extractMeta(html: string, docPath = "/") {
-  const pick = (re: RegExp) => html.match(re)?.[1]?.trim() ?? null;
+  const pick = (re: RegExp) => re.exec(html)?.[1]?.trim() ?? null;
   const title = pick(/<title>([^<]+)<\/title>/i) ?? pick(/<h1[^>]*>([^<]+)</i) ?? "untitled";
   const date = pick(/<meta\s+name="date"\s+content="([^"]+)"/i);
   const tags = (pick(/<meta\s+name="tags"\s+content="([^"]+)"/i) ?? "")
@@ -39,11 +39,11 @@ export function extractMeta(html: string, docPath = "/") {
 /** Tag-stripped text for full-text search. */
 export function plainText(html: string): string {
   return html
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&[a-z#0-9]+;/gi, " ")
-    .replace(/\s+/g, " ")
+    .replaceAll(/<style[\s\S]*?<\/style>/gi, " ")
+    .replaceAll(/<script[\s\S]*?<\/script>/gi, " ")
+    .replaceAll(/<[^>]+>/g, " ")
+    .replaceAll(/&[a-z#0-9]+;/gi, " ")
+    .replaceAll(/\s+/g, " ")
     .trim()
     .slice(0, 50000);
 }

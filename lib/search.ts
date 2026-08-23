@@ -21,14 +21,14 @@ type Row = {
   hl?: boolean | null;
 };
 
-const strip = (s: string) => s.replace(/[\uE000\uE001]/g, "");
-const esc = (s: string) => s.replace(/[%_\\]/g, (m) => "\\" + m);
+const strip = (s: string) => s.replaceAll(/[\uE000\uE001]/g, "");
+const esc = (s: string) => s.replaceAll(/[%_\\]/g, (m) => "\\" + m);
 
 /** Wrap literal occurrences of the query terms — ts_headline can't do CJK with the english config. */
 function markLiteral(text: string, q: string) {
   const terms = q.split(/\s+/).filter(Boolean).sort((a, b) => b.length - a.length);
   if (!terms.length) return text;
-  const re = new RegExp(terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)).join("|"), "gi");
+  const re = new RegExp(terms.map((t) => t.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)).join("|"), "gi");
   return text.replace(re, (m) => SEL_A + m + SEL_B);
 }
 

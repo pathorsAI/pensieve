@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /** The signed authorization query must go back to the server byte-for-byte. */
-const oauthQuery = () => (typeof window === "undefined" ? "" : window.location.search.slice(1));
+const oauthQuery = () => (typeof globalThis.window === "undefined" ? "" : globalThis.location.search.slice(1));
 
 export function ConsentForm() {
   const [busy, setBusy] = useState<"accept" | "deny" | null>(null);
@@ -21,7 +21,7 @@ export function ConsentForm() {
       });
       const data = (await res.json()) as { url?: string; redirect?: boolean };
       if (data?.url) {
-        window.location.href = data.url;
+        globalThis.location.href = data.url;
         return;
       }
       throw new Error("no redirect url");
@@ -49,7 +49,7 @@ export function ConsentForm() {
 /** No session on the consent page means the flow lost its login; send it back. */
 export function ContinueToLogin() {
   return (
-    <Button size="lg" onClick={() => { window.location.href = `/login${window.location.search}`; }}>
+    <Button size="lg" onClick={() => { globalThis.location.href = `/login${globalThis.location.search}`; }}>
       前往登入
     </Button>
   );
