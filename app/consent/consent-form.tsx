@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 /** The signed authorization query must go back to the server byte-for-byte. */
-const oauthQuery = () => (typeof globalThis.window === "undefined" ? "" : globalThis.location.search.slice(1));
+const oauthQuery = () => (globalThis.window === undefined ? "" : globalThis.location.search.slice(1));
 
 export function ConsentForm() {
   const [busy, setBusy] = useState<"accept" | "deny" | null>(null);
