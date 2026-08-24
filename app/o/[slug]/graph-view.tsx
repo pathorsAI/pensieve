@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchPalette } from "@/components/search-palette";
+import { ShareButton } from "./share-button";
 
 type Node = { id: string; title: string; date?: string | null; dir: string; tags: string[]; x?: number; y?: number; vx?: number; vy?: number };
 type Edge = { from: string; to: string };
@@ -400,6 +401,7 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
               <span style={{ fontFamily: "var(--serif)", fontSize: 15.5, color: "var(--ink)", flex: 1,
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{openDoc.title}</span>
               <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>{openDoc.path}</span>
+              <ShareButton key={openDoc.path} slug={slug} path={openDoc.path} />
               <a href={`/o/${slug}/d${openDoc.path}`} target="_blank" rel="noreferrer">
                 <Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
                   <ExternalLink className="size-3.5" /> 開新分頁</Button>
