@@ -133,6 +133,22 @@ export const asset = pgTable("asset", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [uniqueIndex("asset_org_path").on(t.organizationId, t.path)]);
 
+// ---- public sharing ----
+// A share row IS the capability: its id is the unguessable token in the URL, so
+// revoking a link means deleting the row. One live share per (org, document) —
+// re-sharing after a revoke therefore mints a fresh token and the old link dies.
+// Shares are served from SHARE_HOST on a separate origin; see middleware.ts.
+export const share = pgTable("share", {
+  id: text("id").primaryKey(),             // 160-bit hex token, lib/share.ts:newShareToken
+  organizationId: text("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+  documentPath: text("document_path").notNull(),  // matches document.path (extension-stripped)
+  // "link" = anyone holding the URL, no sign-in. Reserved for later: "authenticated", "org".
+  visibility: text("visibility").notNull().default("link"),
+  createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at"),      // null = no expiry
+}, (t) => [uniqueIndex("share_org_doc").on(t.organizationId, t.documentPath)]);
+
 // ---- better-auth mcp / oauth provider ----
 // Transcribed from @better-auth/oauth-provider 1.7.0's declared models (pg
 // mapping: string[] -> text[].array(), json -> jsonb, date -> timestamp).
