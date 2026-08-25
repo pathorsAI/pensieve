@@ -46,7 +46,12 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
   const branch = source.branch || "main";
   const treeRes = await gh(`https://api.github.com/repos/${source.repo}/git/trees/${branch}?recursive=1`);
   if (!treeRes.ok) throw new Error(`tree: ${treeRes.status}`);
-  const tree = (await treeRes.json() as { tree: { path: string; type: string; sha: string }[] }).tree;
+  const treeBody = await treeRes.json() as { tree: { path: string; type: string; sha: string }[]; truncated?: boolean };
+  // A truncated listing is a PARTIAL view of the repo, and the prune below
+  // deletes whatever this listing does not mention — so continuing here would
+  // delete documents that still exist upstream. Fail instead.
+  if (treeBody.truncated) throw new Error("github returned a truncated tree; narrow the source's folder");
+  const tree = treeBody.tree;
 
   const folder = (source.folder ?? "").replaceAll(/^\/|\/$/g, "");
   const prefix = folder ? folder + "/" : "";
@@ -115,30 +120,70 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
           source: sql`excluded.source`, updatedAt: new Date() },
       });
   }
-  const seenAssets = assets.map((a) => a.path);
-  await db.delete(schema.asset).where(and(
-    eq(schema.asset.organizationId, source.organizationId),
-    eq(schema.asset.source, label),
-    seenAssets.length ? notInArray(schema.asset.path, seenAssets) : sql`true`,
-  ));
-
-  // prune everything this source owns that is no longer in the repo (or moved mount)
-  const seen = docs.map((d) => d.path);
-  await db.delete(schema.document).where(and(
-    eq(schema.document.organizationId, source.organizationId),
-    eq(schema.document.source, label),
-    seen.length ? notInArray(schema.document.path, seen) : sql`true`,
-  ));
+  // Prune everything this source owns that is no longer in the repo (or moved
+  // mount) — but a sync that matched NOTHING at all is far more likely a
+  // misconfiguration (wrong branch, mistyped folder) than a repo that genuinely
+  // emptied. Pruning on that would wipe the source's entire mount, so skip and
+  // report it instead.
+  const matchedNothing = !docs.length && !assets.length;
+  if (!matchedNothing) {
+    const seenAssets = assets.map((a) => a.path);
+    await db.delete(schema.asset).where(and(
+      eq(schema.asset.organizationId, source.organizationId),
+      eq(schema.asset.source, label),
+      seenAssets.length ? notInArray(schema.asset.path, seenAssets) : sql`true`,
+    ));
+    const seen = docs.map((d) => d.path);
+    await db.delete(schema.document).where(and(
+      eq(schema.document.organizationId, source.organizationId),
+      eq(schema.document.source, label),
+      seen.length ? notInArray(schema.document.path, seen) : sql`true`,
+    ));
+  }
   await db.update(schema.syncSource).set({ lastSyncAt: new Date() }).where(eq(schema.syncSource.id, source.id));
-  return { synced: docs.length, assets: assets.length };
+  return { synced: docs.length, assets: assets.length, prunedSkipped: matchedNothing };
 }
 
 export async function verifyWebhook(req: Request, body: string): Promise<boolean> {
-  const sig = req.headers.get("x-hub-signature-256") ?? "";
-  const key = await crypto.subtle.importKey("raw",
-    new TextEncoder().encode(process.env.GITHUB_APP_WEBHOOK_SECRET ?? ""),
-    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body));
-  const expect = "sha256=" + [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return sig.length === expect.length && sig === expect;
+  const secret = process.env.GITHUB_APP_WEBHOOK_SECRET;
+  // Without a secret there is nothing to verify against. The old empty-string
+  // fallback still produced a signature — one anyone could recompute — so an
+  // unconfigured deployment accepted forged pushes. Refuse instead.
+  if (!secret) return false;
+  const m = /^sha256=([a-f0-9]{64})$/i.exec(req.headers.get("x-hub-signature-256") ?? "");
+  if (!m) return false;
+  const sig = Uint8Array.from(m[1].match(/../g)!, (h) => parseInt(h, 16));
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  // subtle.verify compares in constant time; the old string === did not
+  return crypto.subtle.verify("HMAC", key, sig, new TextEncoder().encode(body));
+}
+
+/**
+ * Which workspace, if any, already mounts a repo through this installation.
+ *
+ * Nothing else binds an installation to a workspace: /api/github/installations
+ * can see every installation of the App, and a sync source stores whatever
+ * installationId it was handed. So an installation is claimed first-come by the
+ * workspace that first mounts through it, and this lookup is what stops a second
+ * workspace pointing at someone else's private repos.
+ */
+export async function installationOwner(installationId: string): Promise<string | null> {
+  const rows = await db
+    .select({ organizationId: schema.syncSource.organizationId })
+    .from(schema.syncSource)
+    .where(eq(schema.syncSource.installationId, installationId))
+    .limit(1);
+  return rows[0]?.organizationId ?? null;
+}
+
+/** Whether the installation can actually see the repo it is being asked to mount. */
+export async function installationCanSee(installationId: string, repo: string): Promise<boolean> {
+  const token = await installationToken(installationId);
+  const res = await fetch("https://api.github.com/installation/repositories?per_page=100", {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "pensieve" },
+  });
+  if (!res.ok) return false;
+  const { repositories } = await res.json() as { repositories: { full_name: string }[] };
+  return repositories.some((r) => r.full_name.toLowerCase() === repo.toLowerCase());
 }

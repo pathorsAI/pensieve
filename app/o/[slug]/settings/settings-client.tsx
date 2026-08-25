@@ -65,7 +65,7 @@ export function SettingsClient({ slug, orgName }: Readonly<{ slug: string; orgNa
 
   const load = () => {
     fetch(`/api/sources?org=${slug}`).then((r) => r.json()).then((d) => setSources(d.sources ?? []));
-    fetch("/api/github/installations").then((r) => r.json()).then((d) => {
+    fetch(`/api/github/installations?org=${encodeURIComponent(slug)}`).then((r) => r.json()).then((d) => {
       setInsts(d.installations ?? []); setAppMissing(!!d.appMissing); setAppSlug(d.appSlug ?? null);
     });
   };

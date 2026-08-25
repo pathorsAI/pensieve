@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { requireMember } from "@/lib/access";
-import { syncGithubSource } from "@/lib/github";
+import { syncGithubSource, installationOwner, installationCanSee } from "@/lib/github";
 
 export async function GET(req: Request) {
   const slug = new URL(req.url).searchParams.get("org") ?? "";
@@ -58,11 +58,25 @@ export async function POST(req: Request) {
     }
   }
 
+  // create. repo and installationId arrive from the client, so neither can be
+  // trusted: /api/github/installations can see every installation of the App,
+  // and without these checks any member could mount another workspace's private
+  // repo into their own by pairing its id with that installation.
+  if (!body.repo || !body.installationId)
+    return NextResponse.json({ error: "repo and installationId are required" }, { status: 400 });
+
+  const owner = await installationOwner(body.installationId);
+  if (owner && owner !== access.org.id)
+    return NextResponse.json({ error: "that installation is in use by another workspace" }, { status: 403 });
+
+  if (!(await installationCanSee(body.installationId, body.repo)))
+    return NextResponse.json({ error: "that installation cannot access that repo" }, { status: 403 });
+
   const id = crypto.randomUUID();
   await db.insert(schema.syncSource).values({
     id, organizationId: access.org.id, type: "github",
     repo: body.repo, branch: body.branch || "main", folder: body.folder || "",
-    mount: body.mount || "/", installationId: body.installationId || null,
+    mount: body.mount || "/", installationId: body.installationId,
   });
   return NextResponse.json({ ok: true, id });
 }
