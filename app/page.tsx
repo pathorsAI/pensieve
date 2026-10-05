@@ -1,10 +1,19 @@
+import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getDict } from "@/lib/i18n";
 import * as schema from "@/lib/schema";
-import { LoginButton } from "./login-button";
+import { signInMethods } from "@/lib/sign-in-methods";
+import { AuthShell } from "@/components/auth/auth-shell";
+import { SignInMethods } from "@/components/auth/sign-in-methods";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getDict();
+  return { title: t.home.metaTitle };
+}
 
 export default async function Home() {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -17,15 +26,10 @@ export default async function Home() {
       .limit(1);
     if (orgs.length) redirect(`/o/${orgs[0].slug}`);
   }
+  const { locale, t } = await getDict();
   return (
-    <main className="page" style={{ maxWidth: 560, paddingTop: 120 }}>
-      <div className="sub">pensieve</div>
-      <h1>Fly between your documents.</h1>
-      <p style={{ color: "var(--ink-2)", margin: "10px 0 26px", lineHeight: 1.6 }}>
-        An HTML-first knowledge base. Sync folders and repos into a workspace,
-        get a living graph of everything your team knows.
-      </p>
-      <LoginButton />
-    </main>
+    <AuthShell locale={locale} ctx={t.home.ctx} title={t.home.title}>
+      <SignInMethods locale={locale} methods={signInMethods()} callbackURL="/" />
+    </AuthShell>
   );
 }
