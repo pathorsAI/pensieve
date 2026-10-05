@@ -1,12 +1,14 @@
 "use client";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
+import { dictFor, type Locale } from "@/lib/i18n-dict";
 import { Button } from "@/components/ui/button";
 
 /** The signed authorization query must go back to the server byte-for-byte. */
 const oauthQuery = () => (globalThis.window === undefined ? "" : globalThis.location.search.slice(1));
 
-export function ConsentForm() {
+export function ConsentForm({ locale }: Readonly<{ locale: Locale }>) {
+  const t = dictFor(locale);
   const [busy, setBusy] = useState<"accept" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,30 +29,29 @@ export function ConsentForm() {
       throw new Error("no redirect url");
     } catch {
       setBusy(null);
-      setError("授權沒有完成，請回到用戶端重新連線一次。");
+      setError(t.consent.failed);
     }
   }
 
   return (
-    <>
-      <div className="flex gap-3 mt-6">
-        <Button size="lg" disabled={busy !== null} onClick={() => decide(true)}>
-          {busy === "accept" && <Loader2 className="size-4 animate-spin" />}允許存取
-        </Button>
-        <Button size="lg" variant="outline" disabled={busy !== null} onClick={() => decide(false)}>
-          {busy === "deny" && <Loader2 className="size-4 animate-spin" />}拒絕
-        </Button>
-      </div>
-      {error && <p className="text-sm mt-3" style={{ color: "var(--risk)" }}>{error}</p>}
-    </>
+    <div className="auth-methods">
+      <Button type="button" size="lg" className="w-full" disabled={busy !== null} onClick={() => decide(true)}>
+        {busy === "accept" && <Loader2 className="size-4 animate-spin" />}{t.consent.allow}
+      </Button>
+      <Button type="button" size="lg" variant="outline" className="w-full" disabled={busy !== null} onClick={() => decide(false)}>
+        {busy === "deny" && <Loader2 className="size-4 animate-spin" />}{t.consent.deny}
+      </Button>
+      {error && <p className="auth-error" role="alert">{error}</p>}
+    </div>
   );
 }
 
 /** No session on the consent page means the flow lost its login; send it back. */
-export function ContinueToLogin() {
+export function ContinueToLogin({ locale }: Readonly<{ locale: Locale }>) {
   return (
-    <Button size="lg" onClick={() => { globalThis.location.href = `/login${globalThis.location.search}`; }}>
-      前往登入
+    <Button type="button" size="lg" className="w-full"
+      onClick={() => { globalThis.location.href = `/login${globalThis.location.search}`; }}>
+      {dictFor(locale).consent.continueToLogin}
     </Button>
   );
 }
