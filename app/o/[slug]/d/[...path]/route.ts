@@ -1,14 +1,18 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import * as schema from "@/lib/schema";
-import { requireMember } from "@/lib/access";
+import { accessUrl, requireMember } from "@/lib/access";
 
 // Serves a document's HTML with the pensieve nav (pill + backlinks) injected.
 export async function GET(req: Request, ctx: { params: Promise<{ slug: string; path: string[] }> }) {
   const embed = new URL(req.url).searchParams.get("embed") === "1";
   const { slug, path } = await ctx.params;
   const access = await requireMember(slug);
-  if (!access) return new Response("forbidden", { status: 403 });
+  if (!access) {
+    // Not ?embed=1: after signing in the reader should land on the full page.
+    const url = new URL(req.url);
+    return Response.redirect(new URL(accessUrl(url.pathname), url), 302);
+  }
   const rawPath = "/" + path.map(decodeURIComponent).join("/");
   const docPath = rawPath.replace(/\.(html|md)$/, "");
   // assets (css/js/images) synced alongside docs are served from the same tree,
