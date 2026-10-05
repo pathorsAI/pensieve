@@ -43,3 +43,29 @@ export async function memberWorkspaces(userId: string): Promise<Workspace[]> {
     .where(eq(schema.member.userId, userId))
     .orderBy(schema.organization.slug);
 }
+
+/**
+ * Where to send a caller requireMember turned away. /access works out which
+ * case it is (signed out, or signed in as an account outside the workspace) and
+ * offers the fix for that case instead of a bare 403.
+ */
+export function accessUrl(next: string): string {
+  return `/access?next=${encodeURIComponent(next)}`;
+}
+
+/**
+ * Only same-origin paths survive as a post-login destination: "//host" and
+ * "/\host" are protocol-relative to a browser, which would turn the sign-in
+ * flow into an open redirect.
+ */
+export function safeNext(raw: string | null | undefined): string {
+  if (!raw?.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return "/";
+  if (raw.startsWith("/access")) return "/";
+  return raw;
+}
+
+/** The workspace slug a path belongs to (`/o/<slug>/…`), or null. */
+export function workspaceSlugOf(path: string): string | null {
+  const m = /^\/o\/([^/?#]+)/.exec(path);
+  return m ? decodeURIComponent(m[1]) : null;
+}

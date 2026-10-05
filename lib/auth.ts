@@ -18,6 +18,9 @@ export const auth = betterAuth({
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      // Always show Google's account chooser. Without it, signing out to switch
+      // accounts (/access) silently signs the same Google account back in.
+      prompt: "select_account",
     },
   },
   plugins: [

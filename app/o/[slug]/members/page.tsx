@@ -1,6 +1,6 @@
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
-import { requireMember } from "@/lib/access";
+import { accessUrl, requireMember } from "@/lib/access";
 import { db } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,7 @@ import { InviteForm } from "./invite-form";
 export default async function Members({ params }: Readonly<{ params: Promise<{ slug: string }> }>) {
   const { slug } = await params;
   const access = await requireMember(slug);
-  if (!access) notFound();
+  if (!access) redirect(accessUrl(`/o/${slug}/members`));
   const members = await db.select({ name: schema.user.name, email: schema.user.email, role: schema.member.role })
     .from(schema.member).innerJoin(schema.user, eq(schema.member.userId, schema.user.id))
     .where(eq(schema.member.organizationId, access.org.id));
