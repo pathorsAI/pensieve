@@ -30,6 +30,11 @@ const zh = {
   methods: {
     google: "使用 Google 登入",
   },
+  doc: {
+    openInWorkspace: "在 workspace 中開啟",
+    openInWorkspaceHint: "帶著側欄與關聯圖瀏覽這份文件",
+    workspaceHomeHint: "回到 workspace 首頁",
+  },
   home: {
     metaTitle: "登入 · Pensieve",
     ctx: "登入",
@@ -112,6 +117,11 @@ const en: Dict = {
   },
   methods: {
     google: "Sign in with Google",
+  },
+  doc: {
+    openInWorkspace: "Open in workspace",
+    openInWorkspaceHint: "Browse this document with the sidebar and graph",
+    workspaceHomeHint: "Back to the workspace home",
   },
   home: {
     metaTitle: "Sign in · Pensieve",
