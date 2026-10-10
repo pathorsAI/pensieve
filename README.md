@@ -66,6 +66,10 @@ bun run db:push                  # create tables
 bun run dev
 ```
 
+Production schema changes live in `migrations/` and are applied before the
+matching application version is deployed. The files are intentionally plain,
+idempotent SQL because existing installations predate a migration journal.
+
 Deploy: `bun run deploy` (wrangler; set the same vars as secrets), or connect
 the repo to Cloudflare Workers Builds. Google OAuth redirect URI:
 `<base-url>/api/auth/callback/google`.
