@@ -212,7 +212,13 @@ export function SettingsClient({ slug, orgName }: Readonly<{ slug: string; orgNa
             method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ domain: newDomain }),
           });
           const d = await r.json();
-          if (!r.ok) setMsg(`✗ ${d.error}`); else { setNewDomain(""); setMsg("✓ 已新增網域"); load(); }
+          if (r.ok) {
+            setNewDomain("");
+            setMsg("✓ 已新增網域");
+            load();
+          } else {
+            setMsg(`✗ ${d.error}`);
+          }
         }}>Add domain</Button>
       </div>}
     </main>
