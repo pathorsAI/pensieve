@@ -4,6 +4,7 @@ import { organization, jwt } from "better-auth/plugins";
 import { mcp } from "@better-auth/mcp";
 import { db } from "./db";
 import * as schema from "./schema";
+import { ensureAutomaticMemberships } from "./domain-access";
 
 // Origin only — better-auth appends the /api/auth basePath itself, but the MCP
 // resource identifier lives at the app root (/mcp), so it is built from this.
@@ -54,6 +55,17 @@ export const auth = betterAuth({
           await db.insert(schema.member).values({
             id: crypto.randomUUID(), organizationId: orgId, userId: u.id, role: "owner",
           });
+          await ensureAutomaticMemberships(u.id);
+        },
+      },
+    },
+    session: {
+      create: {
+        before: async (s) => {
+          const automaticOrgIds = await ensureAutomaticMemberships(s.userId);
+          if (!s.activeOrganizationId && automaticOrgIds.length) {
+            return { data: { ...s, activeOrganizationId: automaticOrgIds[0] } };
+          }
         },
       },
     },

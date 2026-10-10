@@ -49,6 +49,7 @@ function SourceRow({ s, slug, setMsg, reload, runSync, busy }: Readonly<{
   );
 }
 type Installation = { installationId: string; account: string; repos: { fullName: string; defaultBranch: string }[] };
+type WorkspaceDomain = { id: string; domain: string; autoJoin: boolean };
 
 export function SettingsClient({ slug, orgName }: Readonly<{ slug: string; orgName: string }>) {
   const [sources, setSources] = useState<Source[]>([]);
@@ -62,11 +63,17 @@ export function SettingsClient({ slug, orgName }: Readonly<{ slug: string; orgNa
   const [mount, setMount] = useState("/");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [domains, setDomains] = useState<WorkspaceDomain[]>([]);
+  const [canManageDomains, setCanManageDomains] = useState(false);
+  const [newDomain, setNewDomain] = useState("");
 
   const load = () => {
     fetch(`/api/sources?org=${slug}`).then((r) => r.json()).then((d) => setSources(d.sources ?? []));
     fetch(`/api/github/installations?org=${encodeURIComponent(slug)}`).then((r) => r.json()).then((d) => {
       setInsts(d.installations ?? []); setAppMissing(!!d.appMissing); setAppSlug(d.appSlug ?? null);
+    });
+    fetch(`/api/domains?org=${encodeURIComponent(slug)}`).then((r) => r.json()).then((d) => {
+      setDomains(d.domains ?? []); setCanManageDomains(!!d.canManage);
     });
   };
   useEffect(load, [slug]);
@@ -85,7 +92,8 @@ export function SettingsClient({ slug, orgName }: Readonly<{ slug: string; orgNa
   return (
     <main className="page">
       <div className="sub"><a href={`/o/${slug}`} className="no-underline">← {orgName}</a></div>
-      <h1>Sync sources</h1>
+      <h1>Workspace settings</h1>
+      <h2>Sync sources</h2>
       <p className="text-sm leading-relaxed max-w-xl mb-5" style={{ color: "var(--ink-3)" }}>
         Git 是唯一的資料來源：把 repo（或其中一個 folder）掛進來，push 之後 webhook 自動同步。
         支援 <code className="mono">.html</code> 與 <code className="mono">.md</code>。Pensieve 唯讀，不寫回。
@@ -163,6 +171,50 @@ export function SettingsClient({ slug, orgName }: Readonly<{ slug: string; orgNa
         </TableBody>
       </Table>
       <p className="text-sm mt-2" style={{ color: "var(--ink-3)" }}>{msg}</p>
+
+      <h2 className="mt-10">Workspace access</h2>
+      <p className="text-sm leading-relaxed max-w-xl mb-4" style={{ color: "var(--ink-3)" }}>
+        已驗證下列公司網域的帳號，登入時會自動加入這個 workspace。Personal workspace 仍維持私有。
+      </p>
+      <Table>
+        <TableHeader><TableRow><TableHead>domain</TableHead><TableHead>auto-join</TableHead><TableHead /></TableRow></TableHeader>
+        <TableBody>
+          {domains.map((d) => (
+            <TableRow key={d.id}>
+              <TableCell className="mono">@{d.domain}</TableCell>
+              <TableCell>{d.autoJoin ? "enabled" : "disabled"}</TableCell>
+              <TableCell className="text-right">
+                {canManageDomains && <>
+                  <Button variant="outline" size="sm" onClick={async () => {
+                    await fetch(`/api/domains?org=${encodeURIComponent(slug)}`, {
+                      method: "POST", headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ domain: d.domain, autoJoin: !d.autoJoin }),
+                    });
+                    load();
+                  }}>{d.autoJoin ? "Disable" : "Enable"}</Button>
+                  <Button variant="ghost" size="sm" className="ml-1" style={{ color: "var(--risk)" }} onClick={async () => {
+                    if (!confirm(`移除 @${d.domain} 的自動加入規則？既有成員不會被移除。`)) return;
+                    await fetch(`/api/domains?org=${encodeURIComponent(slug)}`, {
+                      method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: d.id }),
+                    });
+                    load();
+                  }}>移除</Button>
+                </>}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {canManageDomains && <div className="flex gap-2 mt-3 max-w-md">
+        <Input value={newDomain} onChange={(e) => setNewDomain(e.target.value)} placeholder="example.com" />
+        <Button disabled={!newDomain.trim()} onClick={async () => {
+          const r = await fetch(`/api/domains?org=${encodeURIComponent(slug)}`, {
+            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ domain: newDomain }),
+          });
+          const d = await r.json();
+          if (!r.ok) setMsg(`✗ ${d.error}`); else { setNewDomain(""); setMsg("✓ 已新增網域"); load(); }
+        }}>Add domain</Button>
+      </div>}
     </main>
   );
 }

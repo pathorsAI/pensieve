@@ -68,7 +68,18 @@ export const member = pgTable("member", {
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   role: text("role").notNull().default("member"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (t) => [uniqueIndex("member_org_user").on(t.organizationId, t.userId)]);
+
+// A verified email at one of these domains may be enrolled into the workspace
+// automatically. Domains are globally unique so two workspaces can never claim
+// the same identity boundary.
+export const organizationDomain = pgTable("organization_domain", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+  domain: text("domain").notNull().unique(),
+  autoJoin: boolean("auto_join").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("organization_domain_org_idx").on(t.organizationId)]);
 
 export const invitation = pgTable("invitation", {
   id: text("id").primaryKey(),
