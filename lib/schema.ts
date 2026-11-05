@@ -139,6 +139,7 @@ export const asset = pgTable("asset", {
   organizationId: text("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
   path: text("path").notNull(),            // "/engineering/assets/docs.css"
   contentType: text("content_type").notNull(),
+  sha: text("sha"),                        // git blob sha from the last sync; null = written before shas were tracked
   data: text("data").notNull(),            // base64 (as GitHub blobs give it)
   source: text("source").notNull(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
