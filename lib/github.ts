@@ -68,7 +68,6 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
   // cap (see lib/sync-plan.ts). Every write is an idempotent upsert and any
   // failure throws BEFORE the prune, so a half-finished sync never deletes
   // anything and the next push picks up where it stopped.
-  const chunk = 8;
   const blobContent = async (sha: string) => {
     const raw = await gh(`https://api.github.com/repos/${source.repo}/git/blobs/${sha}`);
     if (!raw.ok) throw new Error(`blob ${sha}: ${raw.status}`);
@@ -76,8 +75,8 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
   };
 
   const docs: { path: string; html: string }[] = [];
-  for (let i = 0; i < files.length; i += chunk) {
-    const part = await Promise.all(files.slice(i, i + chunk).map(async (f) => {
+  for (let i = 0; i < files.length; i += BLOB_CONCURRENCY) {
+    const part = await Promise.all(files.slice(i, i + BLOB_CONCURRENCY).map(async (f) => {
       const b64 = await blobContent(f.sha);
       const src = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.codePointAt(0)!));
       const html = f.path.endsWith(".md") ? mdToHtml(src) : src;
@@ -93,27 +92,7 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
     const ext = f.path.split(".").pop()!.toLowerCase();
     return { path: mount + "/" + f.path.slice(prefix.length), sha: f.sha, contentType: ASSET_MIME[ext] ?? "application/octet-stream" };
   });
-  // Only fetch what changed since the last sync: re-downloading every image on
-  // every push is what made each sync carry the whole repo's 60+ MB.
-  const storedRows = await db.select({ path: schema.asset.path, sha: schema.asset.sha }).from(schema.asset)
-    .where(and(eq(schema.asset.organizationId, source.organizationId), eq(schema.asset.source, label)));
-  const toFetch = changedEntries(treeAssets, new Map(storedRows.map((r) => [r.path, r.sha])));
-  let pending: AssetRow[] = [];
-  let pendingBytes = 0;
-  const flush = async () => {
-    await writeAssets(source.organizationId, label, pending);
-    pending = [];
-    pendingBytes = 0;
-  };
-  for (let i = 0; i < toFetch.length; i += chunk) {
-    const part = await Promise.all(toFetch.slice(i, i + chunk).map(async (a) => ({ ...a, data: await blobContent(a.sha) })));
-    for (const a of part) {
-      if (pending.length && pendingBytes + a.data.length > WRITE_BUDGET_BYTES) await flush();
-      pending.push(a);
-      pendingBytes += a.data.length;
-    }
-  }
-  await flush();
+  const assetsFetched = await syncAssets(source.organizationId, label, treeAssets, blobContent);
 
   // Prune everything this source owns that is no longer in the repo (or moved
   // mount) — but a sync that matched NOTHING at all is far more likely a
@@ -122,29 +101,61 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
   // report it instead. "Seen" is the full tree listing, not just what was
   // fetched this time — unchanged assets were skipped, not removed.
   const matchedNothing = !docs.length && !treeAssets.length;
-  if (!matchedNothing) {
-    const seenAssets = treeAssets.map((a) => a.path);
-    await db.delete(schema.asset).where(and(
-      eq(schema.asset.organizationId, source.organizationId),
-      eq(schema.asset.source, label),
-      seenAssets.length ? notInArray(schema.asset.path, seenAssets) : sql`true`,
-    ));
-    const seen = docs.map((d) => d.path);
-    await db.delete(schema.document).where(and(
-      eq(schema.document.organizationId, source.organizationId),
-      eq(schema.document.source, label),
-      seen.length ? notInArray(schema.document.path, seen) : sql`true`,
-    ));
-  }
+  if (!matchedNothing) await pruneSource(source.organizationId, label, docs.map((d) => d.path), treeAssets.map((a) => a.path));
   await db.update(schema.syncSource).set({ lastSyncAt: new Date() }).where(eq(schema.syncSource.id, source.id));
-  return { synced: docs.length, assets: treeAssets.length, assetsFetched: toFetch.length, prunedSkipped: matchedNothing };
+  return { synced: docs.length, assets: treeAssets.length, assetsFetched, prunedSkipped: matchedNothing };
 }
 
 const ASSET_MIME: Record<string, string> = { css: "text/css", js: "text/javascript", png: "image/png",
   jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", svg: "image/svg+xml", webp: "image/webp",
   ico: "image/x-icon", woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", pdf: "application/pdf" };
 
+const BLOB_CONCURRENCY = 8;
+
 type AssetRow = { path: string; sha: string; contentType: string; data: string };
+
+/**
+ * Fetch only the assets whose blob sha changed since the last sync and upsert
+ * them in byte-bounded batches. Re-downloading every image on every push is what
+ * made each sync carry the whole repo's 60+ MB. Returns how many were fetched.
+ */
+async function syncAssets(organizationId: string, label: string,
+  treeAssets: Omit<AssetRow, "data">[], blobContent: (sha: string) => Promise<string>): Promise<number> {
+  const storedRows = await db.select({ path: schema.asset.path, sha: schema.asset.sha }).from(schema.asset)
+    .where(and(eq(schema.asset.organizationId, organizationId), eq(schema.asset.source, label)));
+  const toFetch = changedEntries(treeAssets, new Map(storedRows.map((r) => [r.path, r.sha])));
+  let pending: AssetRow[] = [];
+  let pendingBytes = 0;
+  for (let i = 0; i < toFetch.length; i += BLOB_CONCURRENCY) {
+    const part = await Promise.all(toFetch.slice(i, i + BLOB_CONCURRENCY)
+      .map(async (a) => ({ ...a, data: await blobContent(a.sha) })));
+    for (const a of part) {
+      if (pending.length && pendingBytes + a.data.length > WRITE_BUDGET_BYTES) {
+        await writeAssets(organizationId, label, pending);
+        pending = [];
+        pendingBytes = 0;
+      }
+      pending.push(a);
+      pendingBytes += a.data.length;
+    }
+  }
+  await writeAssets(organizationId, label, pending);
+  return toFetch.length;
+}
+
+/** Delete this source's documents and assets that the repo no longer has. */
+async function pruneSource(organizationId: string, label: string, seenDocs: string[], seenAssets: string[]) {
+  await db.delete(schema.asset).where(and(
+    eq(schema.asset.organizationId, organizationId),
+    eq(schema.asset.source, label),
+    seenAssets.length ? notInArray(schema.asset.path, seenAssets) : sql`true`,
+  ));
+  await db.delete(schema.document).where(and(
+    eq(schema.document.organizationId, organizationId),
+    eq(schema.document.source, label),
+    seenDocs.length ? notInArray(schema.document.path, seenDocs) : sql`true`,
+  ));
+}
 
 async function writeDocuments(organizationId: string, label: string, docs: { path: string; html: string }[]) {
   const rows = docs.map((d) => ({ id: crypto.randomUUID(), organizationId, path: d.path, html: d.html,
