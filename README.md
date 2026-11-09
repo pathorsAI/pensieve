@@ -26,6 +26,9 @@ rendered on sync.)
 - **Sync** — install the Pensieve GitHub App on a repo and add sync sources
   (repo / branch / folder, each with its own mount prefix, several per
   workspace). Pushes sync via webhook; anything deleted upstream is pruned.
+  The webhook answers at once and syncs in the background, downloading only
+  blobs whose sha changed; each source's last attempt (time, trigger, counts or
+  error) is shown under Settings, with a **Sync now** button.
 - **Graph** — links between documents become edges — root-relative and relative
   hrefs both resolve — and every rendered page gets its backlinks injected at the
   bottom. Nothing is stored: the graph is derived from links at read time.

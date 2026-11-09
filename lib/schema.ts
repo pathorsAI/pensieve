@@ -104,6 +104,7 @@ export const document = pgTable("document", {
   html: text("html").notNull(),
   text: text("text").notNull().default(""),  // tag-stripped plain text, for search
   source: text("source").notNull().default("cli"), // mount label of whichever sync wrote it
+  sha: text("sha"),                        // git blob sha from the last sync; null = not tracked yet (refetched once)
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   // Title weighted A (raw + stemmed, so acronyms and names still match exactly),
   // body weighted B — ts_rank_cd then floats a title hit above a passing mention.
@@ -121,6 +122,9 @@ export const document = pgTable("document", {
   index("document_title_trgm").using("gin", t.title.op("gin_trgm_ops")),
 ]);
 
+export type SyncStats = { docs: number; docsFetched: number; assets: number; assetsFetched: number;
+  prunedSkipped: boolean; ms: number };
+
 export const syncSource = pgTable("sync_source", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
@@ -130,7 +134,17 @@ export const syncSource = pgTable("sync_source", {
   folder: text("folder").default(""),              // subfolder within repo, "" = root
   mount: text("mount").notNull().default("/"),     // path prefix inside the workspace
   installationId: text("installation_id"),         // GitHub App installation
-  lastSyncAt: timestamp("last_sync_at"),
+  lastSyncAt: timestamp("last_sync_at"),           // last SUCCESSFUL sync
+  // The latest attempt, whatever its outcome — what the settings page shows.
+  // "running" that is still set long after it started means the worker was cut
+  // off mid-sync (see SYNC_STALE_MS in lib/sync-status.ts).
+  lastSyncStatus: text("last_sync_status"),        // running | ok | error
+  lastSyncStartedAt: timestamp("last_sync_started_at"),
+  lastSyncFinishedAt: timestamp("last_sync_finished_at"),
+  lastSyncError: text("last_sync_error"),
+  lastSyncTrigger: text("last_sync_trigger"),      // push | manual | edit | create
+  lastSyncCommit: text("last_sync_commit"),        // head commit of the push that triggered it, when known
+  lastSyncStats: jsonb("last_sync_stats").$type<SyncStats>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
