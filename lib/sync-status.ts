@@ -28,11 +28,16 @@ export function syncState(s: SyncStatusFields, now = Date.now()): SyncState {
   return s.lastSyncAt ? "ok" : "never";
 }
 
+// [seconds per unit, zh, en], ascending
+const UNITS: readonly (readonly [number, string, string])[] = [
+  [1, "秒", "s"], [60, "分鐘", "min"], [3600, "小時", "h"], [86400, "天", "d"],
+];
+
 /** "3 分鐘前" / "3 min ago", coarse on purpose. */
 export function ago(t: string | Date | null | undefined, locale: "zh-TW" | "en" = "zh-TW", now = Date.now()): string {
   if (!t) return "—";
   const s = Math.max(0, Math.round((now - new Date(t).getTime()) / 1000));
-  const [n, zh, en] = s < 60 ? [s, "秒", "s"] : s < 3600 ? [Math.round(s / 60), "分鐘", "min"]
-    : s < 86400 ? [Math.round(s / 3600), "小時", "h"] : [Math.round(s / 86400), "天", "d"];
+  const [size, zh, en] = UNITS.findLast(([u]) => s >= u) ?? UNITS[0];
+  const n = Math.round(s / size);
   return locale === "en" ? `${n} ${en} ago` : `${n} ${zh}前`;
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AlertTriangle, Check, ChevronsUpDown, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import type { SyncStats } from "@/lib/schema";
-import { ago, syncState, type SyncStatusFields } from "@/lib/sync-status";
+import { ago, syncState, type SyncState, type SyncStatusFields } from "@/lib/sync-status";
 
 type Source = SyncStatusFields & {
   id: string; repo: string | null; branch: string | null; folder: string | null; mount: string; lastSyncAt: string | null;
@@ -20,11 +20,20 @@ type Source = SyncStatusFields & {
 
 const TRIGGER: Record<string, string> = { push: "push", manual: "手動", edit: "改設定", create: "新增" };
 
+const STATE_LABEL: Record<SyncState, string> = { never: "尚未同步", running: "同步中", interrupted: "沒跑完", ok: "成功", error: "失敗" };
+const STATE_COLOR: Record<SyncState, string> = { never: "var(--ink-3)", running: "var(--ink-3)",
+  interrupted: "var(--risk)", ok: "var(--ink-2)", error: "var(--risk)" };
+const STATE_ICON: Record<SyncState, ReactNode> = {
+  never: null, running: <Loader2 className="size-3 animate-spin" />, interrupted: <AlertTriangle className="size-3" />,
+  ok: <Check className="size-3" />, error: <AlertTriangle className="size-3" />,
+};
+
 /** Last attempt: state, when, what triggered it, and either counts or the error. */
 function SyncStatusCell({ s }: Readonly<{ s: Source }>) {
   const st = syncState(s);
-  const label = { never: "尚未同步", running: "同步中", interrupted: "沒跑完", ok: "成功", error: "失敗" }[st];
-  const color = st === "error" || st === "interrupted" ? "var(--risk)" : st === "ok" ? "var(--ink-2)" : "var(--ink-3)";
+  const label = STATE_LABEL[st];
+  const color = STATE_COLOR[st];
+  const icon = STATE_ICON[st];
   const when = st === "ok" ? (s.lastSyncFinishedAt ?? s.lastSyncAt) : s.lastSyncStartedAt;
   const stats = s.lastSyncStats;
   const commit = s.lastSyncCommit && s.repo
@@ -33,9 +42,7 @@ function SyncStatusCell({ s }: Readonly<{ s: Source }>) {
   return (
     <div className="text-[11.5px] leading-snug max-w-[300px]">
       <div className="flex items-center gap-1.5" style={{ color }}>
-        {st === "running" ? <Loader2 className="size-3 animate-spin" />
-          : st === "error" || st === "interrupted" ? <AlertTriangle className="size-3" />
-          : st === "ok" ? <Check className="size-3" /> : null}
+        {icon}
         <span className="font-medium">{label}</span>
         <span className="mono" style={{ color: "var(--ink-3)" }} title={when ? new Date(when).toLocaleString() : undefined}>{ago(when)}</span>
       </div>

@@ -64,8 +64,13 @@ export function notFoundHtml(o: {
   const searchHref = `${home}?search=${encodeURIComponent(seg)}`;
   // raw path, as documents link to each other: the shell matches the href as-is
   const docHref = (p: string) => `${home}/d${p}`;
-  const list = (heading: string, docs: DocRef[]) => docs.length ? `<section><h2>${esc(heading)}</h2><ul>${docs.map((d) =>
-    `<li><a data-doc href="${esc(docHref(d.path))}"><span class="t">${esc(d.title || d.path)}</span><span class="p">${esc(d.path)}</span></a></li>`).join("")}</ul></section>` : "";
+  const item = (d: DocRef) =>
+    `<li><a data-doc href="${esc(docHref(d.path))}"><span class="t">${esc(d.title || d.path)}</span><span class="p">${esc(d.path)}</span></a></li>`;
+  const list = (heading: string, docs: DocRef[]) => {
+    if (!docs.length) return "";
+    const items = docs.map(item).join("");
+    return `<section><h2>${esc(heading)}</h2><ul>${items}</ul></section>`;
+  };
 
   let sync = "";
   if (o.source) {
