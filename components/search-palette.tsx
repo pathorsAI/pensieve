@@ -29,14 +29,18 @@ function Marked({ text }: Readonly<{ text: string }>) {
   );
 }
 
-export function SearchPalette({ slug, open, onOpenChange, recent, onOpen }: Readonly<{
+export function SearchPalette({ slug, open, onOpenChange, recent, onOpen, initialQuery = "" }: Readonly<{
   slug: string; open: boolean; onOpenChange: (v: boolean) => void;
   recent: PaletteDoc[]; onOpen: (path: string, title: string) => void;
+  /** prefilled when the palette is opened from elsewhere (the document 404 page's "search") */
+  initialQuery?: string;
 }>) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<PaletteHit[] | null>(null);
 
-  useEffect(() => { if (!open) { setQ(""); setHits(null); } }, [open]);
+  useEffect(() => {
+    if (!open) { setQ(""); setHits(null); } else if (initialQuery) setQ(initialQuery);
+  }, [open, initialQuery]);
 
   useEffect(() => {
     if (q.trim().length < 2) { setHits(null); return; }

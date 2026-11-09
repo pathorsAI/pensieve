@@ -4,6 +4,7 @@ import * as schema from "@/lib/schema";
 import { accessUrl, requireMember } from "@/lib/access";
 import { getDict } from "@/lib/i18n";
 import { arg, navScript, type NavLabels } from "@/lib/doc-nav";
+import { closeMatches, linkingDocs, notFoundHtml, sourceFor } from "@/lib/not-found-page";
 
 // Serves a document's HTML with the pensieve nav (toolbar + backlinks) injected.
 export async function GET(req: Request, ctx: { params: Promise<{ slug: string; path: string[] }> }) {
@@ -28,7 +29,20 @@ export async function GET(req: Request, ctx: { params: Promise<{ slug: string; p
   }
   const rows = await db.select().from(schema.document).where(and(
     eq(schema.document.organizationId, access.org.id), eq(schema.document.path, docPath))).limit(1);
-  if (!rows.length) return new Response("not found", { status: 404 });
+  if (!rows.length) {
+    // A missing image or stylesheet stays a bare 404 — it is never looked at as a page.
+    if (/\.(css|js|mjs|map|json|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|pdf|mp4|webm|txt)$/i.test(docPath)) return new Response("not found", { status: 404 });
+    const { locale, t } = await getDict();
+    const [suggestions, linkedFrom, sources] = await Promise.all([
+      closeMatches(access.org.id, docPath),
+      linkingDocs(access.org.id, docPath),
+      db.select().from(schema.syncSource).where(eq(schema.syncSource.organizationId, access.org.id)),
+    ]);
+    const html = notFoundHtml({ slug, orgName: access.org.name, docPath, embed, locale, t,
+      suggestions, linkedFrom, source: sourceFor(sources, docPath) });
+    return new Response(html, { status: 404,
+      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+  }
 
   const { t } = await getDict();
   const ui: NavLabels = {

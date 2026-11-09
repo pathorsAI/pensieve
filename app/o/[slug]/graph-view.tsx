@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchPalette } from "@/components/search-palette";
 import { ShareButton } from "./share-button";
+import { syncState, type SyncState, type SyncStatusFields } from "@/lib/sync-status";
 
 type Node = { id: string; title: string; date?: string | null; dir: string; tags: string[]; x?: number; y?: number; vx?: number; vy?: number };
 type Edge = { from: string; to: string };
@@ -209,6 +210,8 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
   const [orgs, setOrgs] = useState<{ slug: string; name: string }[]>([]);
   const [sideOpen, setSideOpen] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [syncIssue, setSyncIssue] = useState<SyncState | null>(null);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const hotRef = useRef<Node | null>(null);
   const openRef = useRef<(path: string, title: string) => void>(() => {});
@@ -216,6 +219,22 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
 
   useEffect(() => { fetch(`/api/graph?org=${slug}`).then((r) => r.json()).then(setGraph); }, [slug]);
   useEffect(() => { fetch("/api/orgs").then((r) => r.json()).then((d) => setOrgs(d.orgs ?? [])); }, []);
+  // a failed or cut-off sync is surfaced here too, not only on the settings page
+  useEffect(() => {
+    fetch(`/api/sources?org=${slug}`).then((r) => r.json()).then((d: { sources?: SyncStatusFields[] }) => {
+      const states = (d.sources ?? []).map((s) => syncState(s));
+      setSyncIssue(states.find((s) => s === "error") ?? states.find((s) => s === "interrupted") ?? null);
+    }).catch(() => {});
+  }, [slug]);
+  // ?search=… (from the document 404 page) opens the palette prefilled
+  useEffect(() => {
+    const u = new URL(location.href);
+    const s = u.searchParams.get("search");
+    if (s === null) return;
+    u.searchParams.delete("search");
+    history.replaceState(history.state, "", u.pathname + u.search + u.hash);
+    setPaletteQuery(s); setPaletteOpen(true);
+  }, []);
 
   useEffect(() => {
     const onPop = () => setOpenDoc(location.hash.startsWith("#/")
@@ -231,7 +250,7 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
   // ⌘K anywhere in the workspace; the doc iframe forwards its own keystroke as a message.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteOpen((v) => !v); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setPaletteQuery(""); setPaletteOpen((v) => !v); }
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
@@ -241,7 +260,8 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
     const onMsg = (e: MessageEvent) => {
       // only our own doc iframes may drive the shell — synced HTML can embed third-party frames
       if (e.origin !== location.origin) return;
-      if ((e.data as { pnsvPalette?: boolean })?.pnsvPalette) { setPaletteOpen(true); return; }
+      const pal = e.data as { pnsvPalette?: boolean; q?: string };
+      if (pal?.pnsvPalette) { setPaletteQuery(typeof pal.q === "string" ? pal.q : ""); setPaletteOpen(true); return; }
       const href = (e.data as { pnsvOpen?: string })?.pnsvOpen;
       if (!href) return;
       const m = DOC_HREF.exec(href);
@@ -303,7 +323,7 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
     <div style={{ display: "flex", height: "100vh" }}>
 
       <SearchPalette slug={slug} open={paletteOpen} onOpenChange={setPaletteOpen}
-        recent={recent} onOpen={open} />
+        recent={recent} onOpen={open} initialQuery={paletteQuery} />
 
       <aside style={{ width: sideOpen ? 320 : 0, minWidth: sideOpen ? 270 : 0, overflow: "hidden",
         borderRight: sideOpen ? "1px solid var(--rule)" : "none", display: "flex", flexDirection: "column",
@@ -385,6 +405,12 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
             className="sub" style={{ textDecoration: "none", cursor: "pointer" }}>graph</a>
           <a href={`/o/${slug}/members`} className="sub" style={{ textDecoration: "none" }}>members</a>
           <a href={`/o/${slug}/settings`} className="sub" style={{ textDecoration: "none" }}>settings</a>
+          {syncIssue && (
+            <a href={`/o/${slug}/settings`} className="sub" title="最近一次同步失敗或沒跑完，點進去看原因"
+              style={{ textDecoration: "none", color: "var(--risk)" }}>
+              {syncIssue === "error" ? "同步失敗" : "同步中斷"}
+            </a>
+          )}
         </div>
       </aside>
 

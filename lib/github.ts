@@ -36,8 +36,13 @@ async function installationToken(installationId: string): Promise<string> {
   return (await res.json() as { token: string }).token;
 }
 
-/** Pull every .html under source.folder from the repo and upsert into the workspace. */
-export async function syncGithubSource(source: typeof schema.syncSource.$inferSelect) {
+/**
+ * Mirror every .html/.md (and asset) under source.folder into the workspace.
+ * Only blobs whose sha changed are downloaded; `full` re-downloads everything
+ * (e.g. after a change to how markdown renders). Callers go through runSync,
+ * which records the outcome on the source row.
+ */
+export async function syncGithubSource(source: typeof schema.syncSource.$inferSelect, opts: { full?: boolean } = {}) {
   if (!source.repo || !source.installationId) throw new Error("source missing repo/installationId");
   const token = await installationToken(source.installationId);
   const gh = (url: string) => fetch(url, {
@@ -74,14 +79,22 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
     return ((await raw.json()) as { content: string }).content.replaceAll("\n", "");
   };
 
-  const docs: { path: string; html: string }[] = [];
-  for (let i = 0; i < files.length; i += BLOB_CONCURRENCY) {
-    const part = await Promise.all(files.slice(i, i + BLOB_CONCURRENCY).map(async (f) => {
+  // Only documents whose blob sha changed are downloaded — same rule as the
+  // assets below. Re-fetching every doc on every push made a sync of
+  // pathors-docs run past 45 s, longer than a webhook delivery can wait.
+  const treeDocs = files.map((f) => ({ path: mount + "/" + f.path.slice(prefix.length).replace(/\.(html|md)$/, ""),
+    sha: f.sha, isMd: f.path.endsWith(".md") }));
+  const storedDocs = opts.full ? new Map<string, string | null>() : new Map((await db
+    .select({ path: schema.document.path, sha: schema.document.sha }).from(schema.document)
+    .where(and(eq(schema.document.organizationId, source.organizationId), eq(schema.document.source, label))))
+    .map((r) => [r.path, r.sha]));
+  const docsToFetch = changedEntries(treeDocs, storedDocs);
+  const docs: { path: string; sha: string; html: string }[] = [];
+  for (let i = 0; i < docsToFetch.length; i += BLOB_CONCURRENCY) {
+    const part = await Promise.all(docsToFetch.slice(i, i + BLOB_CONCURRENCY).map(async (f) => {
       const b64 = await blobContent(f.sha);
       const src = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.codePointAt(0)!));
-      const html = f.path.endsWith(".md") ? mdToHtml(src) : src;
-      const rel = "/" + f.path.slice(prefix.length).replace(/\.(html|md)$/, "");
-      return { path: mount + rel, html };
+      return { path: f.path, sha: f.sha, html: f.isMd ? mdToHtml(src) : src };
     }));
     docs.push(...part);
   }
@@ -92,7 +105,7 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
     const ext = f.path.split(".").pop()!.toLowerCase();
     return { path: mount + "/" + f.path.slice(prefix.length), sha: f.sha, contentType: ASSET_MIME[ext] ?? "application/octet-stream" };
   });
-  const assetsFetched = await syncAssets(source.organizationId, label, treeAssets, blobContent);
+  const assetsFetched = await syncAssets(source.organizationId, label, treeAssets, blobContent, opts.full);
 
   // Prune everything this source owns that is no longer in the repo (or moved
   // mount) — but a sync that matched NOTHING at all is far more likely a
@@ -100,10 +113,46 @@ export async function syncGithubSource(source: typeof schema.syncSource.$inferSe
   // emptied. Pruning on that would wipe the source's entire mount, so skip and
   // report it instead. "Seen" is the full tree listing, not just what was
   // fetched this time — unchanged assets were skipped, not removed.
-  const matchedNothing = !docs.length && !treeAssets.length;
-  if (!matchedNothing) await pruneSource(source.organizationId, label, docs.map((d) => d.path), treeAssets.map((a) => a.path));
-  await db.update(schema.syncSource).set({ lastSyncAt: new Date() }).where(eq(schema.syncSource.id, source.id));
-  return { synced: docs.length, assets: treeAssets.length, assetsFetched, prunedSkipped: matchedNothing };
+  const matchedNothing = !treeDocs.length && !treeAssets.length;
+  if (!matchedNothing) await pruneSource(source.organizationId, label, treeDocs.map((d) => d.path), treeAssets.map((a) => a.path));
+  return { synced: treeDocs.length, docsFetched: docs.length, assets: treeAssets.length, assetsFetched,
+    prunedSkipped: matchedNothing };
+}
+
+export type SyncTrigger = "push" | "manual" | "edit" | "create";
+
+/** Mark a source as syncing, so a sync that never reports back is visible as one. */
+export async function markSyncStarted(sourceId: string, trigger: SyncTrigger, commit?: string | null) {
+  await db.update(schema.syncSource).set({
+    lastSyncStatus: "running", lastSyncStartedAt: new Date(), lastSyncFinishedAt: null, lastSyncError: null,
+    lastSyncTrigger: trigger, lastSyncCommit: commit ?? null,
+  }).where(eq(schema.syncSource.id, sourceId));
+}
+
+/**
+ * Run one sync and record its outcome on the source row — ok with counts, or
+ * the error — so a failure shows on the settings page instead of only in
+ * GitHub's webhook delivery log. Rethrows after recording.
+ */
+export async function runSync(source: typeof schema.syncSource.$inferSelect,
+  trigger: SyncTrigger, opts: { commit?: string | null; full?: boolean; started?: boolean } = {}) {
+  if (!opts.started) await markSyncStarted(source.id, trigger, opts.commit);
+  const t0 = Date.now();
+  try {
+    const r = await syncGithubSource(source, { full: opts.full });
+    const now = new Date();
+    await db.update(schema.syncSource).set({
+      lastSyncAt: now, lastSyncStatus: "ok", lastSyncFinishedAt: now, lastSyncError: null,
+      lastSyncStats: { docs: r.synced, docsFetched: r.docsFetched, assets: r.assets, assetsFetched: r.assetsFetched,
+        prunedSkipped: r.prunedSkipped, ms: Date.now() - t0 },
+    }).where(eq(schema.syncSource.id, source.id));
+    return r;
+  } catch (e) {
+    await db.update(schema.syncSource).set({
+      lastSyncStatus: "error", lastSyncFinishedAt: new Date(), lastSyncError: String(e).slice(0, 2000),
+    }).where(eq(schema.syncSource.id, source.id)).catch(() => {});
+    throw e;
+  }
 }
 
 const ASSET_MIME: Record<string, string> = { css: "text/css", js: "text/javascript", png: "image/png",
@@ -120,8 +169,8 @@ type AssetRow = { path: string; sha: string; contentType: string; data: string }
  * made each sync carry the whole repo's 60+ MB. Returns how many were fetched.
  */
 async function syncAssets(organizationId: string, label: string,
-  treeAssets: Omit<AssetRow, "data">[], blobContent: (sha: string) => Promise<string>): Promise<number> {
-  const storedRows = await db.select({ path: schema.asset.path, sha: schema.asset.sha }).from(schema.asset)
+  treeAssets: Omit<AssetRow, "data">[], blobContent: (sha: string) => Promise<string>, full = false): Promise<number> {
+  const storedRows = full ? [] : await db.select({ path: schema.asset.path, sha: schema.asset.sha }).from(schema.asset)
     .where(and(eq(schema.asset.organizationId, organizationId), eq(schema.asset.source, label)));
   const toFetch = changedEntries(treeAssets, new Map(storedRows.map((r) => [r.path, r.sha])));
   let pending: AssetRow[] = [];
@@ -157,8 +206,9 @@ async function pruneSource(organizationId: string, label: string, seenDocs: stri
   ));
 }
 
-async function writeDocuments(organizationId: string, label: string, docs: { path: string; html: string }[]) {
-  const rows = docs.map((d) => ({ id: crypto.randomUUID(), organizationId, path: d.path, html: d.html,
+async function writeDocuments(organizationId: string, label: string, docs: { path: string; sha: string; html: string }[]) {
+  if (!docs.length) return;
+  const rows = docs.map((d) => ({ id: crypto.randomUUID(), organizationId, path: d.path, sha: d.sha, html: d.html,
     text: plainText(d.html), source: label, ...extractMeta(d.html, d.path) }));
   // length counts UTF-16 units; ×3 covers UTF-8 CJK and JSON quote escaping.
   for (const batch of byteBatches(rows, (r) => (r.html.length + r.text.length) * 3)) {
@@ -167,7 +217,7 @@ async function writeDocuments(organizationId: string, label: string, docs: { pat
       set: {
         html: sql`excluded.html`, text: sql`excluded.text`, title: sql`excluded.title`,
         date: sql`excluded.date`, tags: sql`excluded.tags`, links: sql`excluded.links`,
-        source: sql`excluded.source`, updatedAt: new Date(),
+        source: sql`excluded.source`, sha: sql`excluded.sha`, updatedAt: new Date(),
       },
     });
   }

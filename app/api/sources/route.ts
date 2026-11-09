@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import * as schema from "@/lib/schema";
 import { requireMember } from "@/lib/access";
-import { syncGithubSource, installationOwner, installationCanSee } from "@/lib/github";
+import { runSync, installationOwner, installationCanSee } from "@/lib/github";
 
 export async function GET(req: Request) {
   const slug = new URL(req.url).searchParams.get("org") ?? "";
@@ -14,7 +14,7 @@ export async function GET(req: Request) {
 }
 
 // { org, repo, branch?, folder?, mount?, installationId } → create source
-// { org, syncId } → run a sync now
+// { org, syncId, full? } → run a sync now (full re-downloads every blob)
 // { org, updateId, branch?, folder?, mount? } → edit then resync (prune moves old paths)
 // { org, deleteId } → remove source and every document it owns
 export async function POST(req: Request) {
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     }).where(eq(schema.syncSource.id, body.updateId));
     const fresh = (await db.select().from(schema.syncSource).where(eq(schema.syncSource.id, body.updateId)))[0];
     try {
-      const r = await syncGithubSource(fresh);
+      const r = await runSync(fresh, "edit");
       return NextResponse.json({ ok: true, ...r });
     } catch (e) { return NextResponse.json({ error: String(e) }, { status: 500 }); }
   }
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     if (!rows.length || rows[0].organizationId !== access.org.id)
       return NextResponse.json({ error: "not found" }, { status: 404 });
     try {
-      const r = await syncGithubSource(rows[0]);
+      const r = await runSync(rows[0], body.created ? "create" : "manual", { full: !!body.full });
       return NextResponse.json({ ok: true, ...r });
     } catch (e) {
       return NextResponse.json({ error: String(e) }, { status: 500 });

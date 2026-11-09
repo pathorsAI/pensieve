@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Check, ChevronsUpDown, ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, ChevronsUpDown, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,8 +9,51 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import type { SyncStats } from "@/lib/schema";
+import { ago, syncState, type SyncStatusFields } from "@/lib/sync-status";
 
-type Source = { id: string; repo: string | null; branch: string | null; folder: string | null; mount: string; lastSyncAt: string | null };
+type Source = SyncStatusFields & {
+  id: string; repo: string | null; branch: string | null; folder: string | null; mount: string; lastSyncAt: string | null;
+  lastSyncFinishedAt: string | null; lastSyncError: string | null; lastSyncTrigger: string | null;
+  lastSyncCommit: string | null; lastSyncStats: SyncStats | null;
+};
+
+const TRIGGER: Record<string, string> = { push: "push", manual: "手動", edit: "改設定", create: "新增" };
+
+/** Last attempt: state, when, what triggered it, and either counts or the error. */
+function SyncStatusCell({ s }: Readonly<{ s: Source }>) {
+  const st = syncState(s);
+  const label = { never: "尚未同步", running: "同步中", interrupted: "沒跑完", ok: "成功", error: "失敗" }[st];
+  const color = st === "error" || st === "interrupted" ? "var(--risk)" : st === "ok" ? "var(--ink-2)" : "var(--ink-3)";
+  const when = st === "ok" ? (s.lastSyncFinishedAt ?? s.lastSyncAt) : s.lastSyncStartedAt;
+  const stats = s.lastSyncStats;
+  const commit = s.lastSyncCommit && s.repo
+    ? <a className="underline" href={`https://github.com/${s.repo}/commit/${s.lastSyncCommit}`} target="_blank" rel="noreferrer">
+        {s.lastSyncCommit.slice(0, 7)}</a> : null;
+  return (
+    <div className="text-[11.5px] leading-snug max-w-[300px]">
+      <div className="flex items-center gap-1.5" style={{ color }}>
+        {st === "running" ? <Loader2 className="size-3 animate-spin" />
+          : st === "error" || st === "interrupted" ? <AlertTriangle className="size-3" />
+          : st === "ok" ? <Check className="size-3" /> : null}
+        <span className="font-medium">{label}</span>
+        <span className="mono" style={{ color: "var(--ink-3)" }} title={when ? new Date(when).toLocaleString() : undefined}>{ago(when)}</span>
+      </div>
+      <div className="mono" style={{ color: "var(--ink-3)" }}>
+        {s.lastSyncTrigger && <>{TRIGGER[s.lastSyncTrigger] ?? s.lastSyncTrigger}</>}
+        {commit && <> · {commit}</>}
+        {st === "ok" && stats && <> · {stats.docs} 份（更新 {stats.docsFetched}）· 素材 {stats.assets}（更新 {stats.assetsFetched}）· {(stats.ms / 1000).toFixed(1)}s</>}
+      </div>
+      {st === "error" && s.lastSyncError && (
+        <div className="mono mt-0.5 break-all" style={{ color: "var(--risk)" }}>{s.lastSyncError.slice(0, 240)}</div>
+      )}
+      {st === "interrupted" && <div className="mt-0.5" style={{ color: "var(--risk)" }}>開始後一直沒有回報結果，按 Sync 重跑。</div>}
+      {st !== "ok" && st !== "never" && s.lastSyncAt && (
+        <div style={{ color: "var(--ink-3)" }}>上次成功 {ago(s.lastSyncAt)}</div>
+      )}
+    </div>
+  );
+}
 
 function SourceRow({ s, slug, setMsg, reload, runSync, busy }: Readonly<{
   s: Source; slug: string; setMsg: (m: string) => void; reload: () => void; runSync: (id: string) => void; busy: string | null;
@@ -25,18 +68,19 @@ function SourceRow({ s, slug, setMsg, reload, runSync, busy }: Readonly<{
       <TableCell><Input className="w-24 h-7 mono text-xs" value={branch} onChange={(e) => setBranch(e.target.value)} /></TableCell>
       <TableCell><Input className="w-28 h-7 mono text-xs" value={folder} onChange={(e) => setFolder(e.target.value)} placeholder="/" /></TableCell>
       <TableCell><Input className="w-24 h-7 mono text-xs" value={mount} onChange={(e) => setMount(e.target.value)} /></TableCell>
-      <TableCell className="mono text-[11px]">{s.lastSyncAt?.slice(0, 16) ?? "never"}</TableCell>
+      <TableCell><SyncStatusCell s={s} /></TableCell>
       <TableCell className="whitespace-nowrap">
         {dirty ? (
           <Button size="sm" onClick={async () => {
             setMsg("saving…");
             const r = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
               body: JSON.stringify({ org: slug, updateId: s.id, branch, folder, mount }) });
-            const d = await r.json(); setMsg(d.error ? `✗ ${d.error}` : `✓ 已改設定並重新同步 ${d.synced} 份`); reload();
+            const d = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+            setMsg(d.error ? `✗ ${d.error}` : `✓ 已改設定並重新同步 ${d.synced} 份`); reload();
           }}>Save + resync</Button>
         ) : (
           <Button variant="outline" size="sm" disabled={busy === s.id} onClick={() => runSync(s.id)}>
-            {busy === s.id ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} Sync</Button>
+            {busy === s.id ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} Sync now</Button>
         )}
         <Button variant="ghost" size="sm" className="ml-1" style={{ color: "var(--risk)" }} onClick={async () => {
           if (!confirm(`移除 ${s.repo}？它同步進來的文件會一併刪除（repo 本身不動）。`)) return;
@@ -82,12 +126,25 @@ export function SettingsClient({ slug, orgName }: Readonly<{ slug: string; orgNa
   const chosen = allRepos.find((r) => r.fullName === repo);
   const installUrl = appSlug ? `https://github.com/apps/${appSlug}/installations/new` : null;
 
-  const runSync = async (syncId: string) => {
+  const runSync = async (syncId: string, created = false) => {
     setBusy(syncId); setMsg("syncing…");
+    // the row shows "running" while this request is in flight
+    setTimeout(load, 800);
     const r = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ org: slug, syncId }) });
-    const d = await r.json(); setMsg(d.error ? `✗ ${d.error}` : `✓ 已同步 ${d.synced} 份`); setBusy(null); load();
+      body: JSON.stringify({ org: slug, syncId, ...(created ? { created: "1" } : {}) }) });
+    const d = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    setMsg(d.error ? `✗ ${d.error}` : `✓ 已同步 ${d.synced} 份（下載 ${d.docsFetched} 份、素材 ${d.assetsFetched} 個）`);
+    setBusy(null); load();
   };
+
+  // a push sync runs in the background: keep the table fresh while one is running
+  const anyRunning = sources.some((s) => syncState(s) === "running");
+  useEffect(() => {
+    if (!anyRunning) return;
+    const t = setInterval(() => fetch(`/api/sources?org=${slug}`).then((r) => r.json())
+      .then((d) => setSources(d.sources ?? [])), 4000);
+    return () => clearInterval(t);
+  }, [anyRunning, slug]);
 
   return (
     <main className="page">
@@ -149,7 +206,7 @@ export function SettingsClient({ slug, orgName }: Readonly<{ slug: string; orgNa
             const r = await fetch("/api/sources", { method: "POST", headers: { "content-type": "application/json" },
               body: JSON.stringify({ org: slug, repo, branch, folder, mount, installationId: chosen!.installationId }) });
             const d = await r.json();
-            if (d.id) await runSync(d.id); else load();
+            if (d.id) await runSync(d.id, true); else load();
             setBusy(null);
           }}>{busy === "add" ? <Loader2 className="size-3.5 animate-spin" /> : null}Add + sync</Button>
         </div>
