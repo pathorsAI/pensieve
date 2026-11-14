@@ -36,14 +36,26 @@ export function extractMeta(html: string, docPath = "/") {
   return { title, date, tags, links };
 }
 
-/** Tag-stripped text for full-text search. */
+/** `<meta name="description">` in either attribute order; null when missing or empty. */
+export function metaDescription(html: string): string | null {
+  const tag = /<meta\b[^>]*\bname=["']description["'][^>]*>/i.exec(html)?.[0];
+  const v = tag && /\bcontent=["']([^"']*)["']/i.exec(tag)?.[1]
+    ?.replaceAll(/&[a-z#0-9]+;/gi, " ").replaceAll(/\s+/g, " ").trim();
+  return v || null;
+}
+
+/**
+ * Tag-stripped text for full-text search. The meta description leads it: it is the
+ * author's own one-line summary, and stripping tags would otherwise throw it away.
+ */
 export function plainText(html: string): string {
-  return html
+  const desc = metaDescription(html);
+  const body = html
     .replaceAll(/<style[\s\S]*?<\/style>/gi, " ")
     .replaceAll(/<script[\s\S]*?<\/script>/gi, " ")
     .replaceAll(/<[^>]+>/g, " ")
     .replaceAll(/&[a-z#0-9]+;/gi, " ")
     .replaceAll(/\s+/g, " ")
-    .trim()
-    .slice(0, 50000);
+    .trim();
+  return (desc ? desc + " · " + body : body).slice(0, 50000);
 }

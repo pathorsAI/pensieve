@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchPalette } from "@/components/search-palette";
+import { cleanFilters, filterDocs, hasFilters, isSearchable, monthOptions, normTag, tagOptions, type FindFilters } from "@/lib/find";
 import { ShareButton } from "./share-button";
 
 type Node = { id: string; title: string; date?: string | null; dir: string; tags: string[]; x?: number; y?: number; vx?: number; vy?: number };
@@ -155,6 +156,85 @@ function RelLink({ slug, n, onOpen }: Readonly<{ slug: string; n: Node; onOpen: 
   );
 }
 
+/** One row in the results list: title, date · path, snippet, clickable tags. */
+function ResultRow({ slug, path, title, date, tags, snippet, activeTag, onTag, onOpen }: Readonly<{
+  slug: string; path: string; title: string; date?: string | null; tags: string[]; snippet?: string;
+  activeTag: string | null; onTag: (t: string) => void; onOpen: OpenDoc;
+}>) {
+  const shown = [...new Set(tags.map(normTag))].slice(0, 4);
+  return (
+    <div style={{ padding: "8px 18px", borderBottom: "1px solid var(--rule-soft)" }}>
+      <a href={`/o/${slug}/d${path}`} onClick={(e) => { e.preventDefault(); onOpen(path, title); }}
+        style={{ display: "block", textDecoration: "none", color: "var(--ink)", fontSize: 13.5, lineHeight: 1.4 }}>
+        {title}
+      </a>
+      <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 2, overflow: "hidden",
+        textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={path}>
+        {date ? `${date} · ` : ""}{path}
+      </div>
+      {snippet && <div style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 3, lineHeight: 1.45 }}>{snippet}</div>}
+      {shown.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
+          {shown.map((t) => (
+            <button key={t} type="button" onClick={() => onTag(t)} aria-pressed={activeTag === t}
+              title={`只看標籤 ${t}`}
+              style={{ ...bareButton, fontSize: 10.5, padding: "1px 6px", borderRadius: 999,
+                border: "1px solid var(--rule)", color: activeTag === t ? "var(--accent-2)" : "var(--ink-3)",
+                background: activeTag === t ? "var(--accent-wash)" : undefined }}>
+              #{t}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ALL = "__all";
+
+/** Month + tag pickers and the active-filter chips (folder included). */
+function FilterBar({ nodes, f, setMonth, setTag, setFolder }: Readonly<{
+  nodes: Node[]; f: FindFilters;
+  setMonth: (m: string | null) => void; setTag: (t: string | null) => void; setFolder: (p: string | null) => void;
+}>) {
+  const months = useMemo(() => monthOptions(nodes), [nodes]);
+  const tags = useMemo(() => tagOptions(nodes).slice(0, 60), [nodes]);
+  const chip = (label: string, clear: () => void) => (
+    <button type="button" onClick={clear} title="清除這個篩選"
+      style={{ ...bareButton, display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, padding: "2px 8px",
+        borderRadius: 999, color: "var(--accent-2)", background: "var(--accent-wash)" }}>
+      {label}<X className="size-3" />
+    </button>
+  );
+  return (
+    <div className="border-b px-2.5 pb-2.5" style={{ borderColor: "var(--rule-soft)" }}>
+      <div className="flex gap-1.5">
+        <Select value={f.month ?? ALL} onValueChange={(v) => setMonth(v === ALL ? null : v)}>
+          <SelectTrigger className="h-7 flex-1 text-xs" aria-label="依月份篩選"><SelectValue placeholder="月份" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>所有月份</SelectItem>
+            {months.map((m) => <SelectItem key={m.month} value={m.month}>{m.month} · {m.count}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={f.tag ?? ALL} onValueChange={(v) => setTag(v === ALL ? null : v)}>
+          <SelectTrigger className="h-7 flex-1 text-xs" aria-label="依標籤篩選"><SelectValue placeholder="標籤" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>所有標籤</SelectItem>
+            {tags.map((t) => <SelectItem key={t.tag} value={t.tag}>#{t.tag} · {t.count}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      {hasFilters(f) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 7 }}>
+          {f.folder && chip(f.folder, () => setFolder(null))}
+          {f.month && chip(f.month, () => setMonth(null))}
+          {f.tag && chip("#" + f.tag, () => setTag(null))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Collapse arrow and folder name are two separate actions; both are buttons so
  *  they carry a role and answer to the keyboard, not just to the mouse. */
 const bareButton = { background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left" } as const;
@@ -204,6 +284,8 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
+  const [month, setMonth] = useState<string | null>(null);
+  const [tag, setTag] = useState<string | null>(null);
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const [openDoc, setOpenDoc] = useState<{ path: string; title: string } | null>(null);
   const [orgs, setOrgs] = useState<{ slug: string; name: string }[]>([]);
@@ -263,14 +345,27 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
     }
   }, [graph, openDoc]);
 
+  // folder (the tree's own filter) only narrows the list once a query, month or tag is in play;
+  // on its own it keeps meaning "show this folder on the graph", as before.
+  const filters = useMemo(() => cleanFilters({ folder: filter, month, tag }), [filter, month, tag]);
+  const searching = isSearchable(q);
+  const browsing = !searching && !!(filters.month || filters.tag);
+
   useEffect(() => {
-    if (q.trim().length < 2) { setHits(null); return; }
+    if (!searching) { setHits(null); return; }
+    let alive = true;
+    const params = new URLSearchParams({ org: slug, q: q.trim() });
+    if (filters.folder) params.set("folder", filters.folder);
+    if (filters.month) params.set("month", filters.month);
+    if (filters.tag) params.set("tag", filters.tag);
     const t = setTimeout(() => {
-      fetch(`/api/search?org=${slug}&q=${encodeURIComponent(q.trim())}`)
-        .then((r) => r.json()).then((d) => setHits(d.hits ?? []));
+      fetch(`/api/search?${params}`).then((r) => r.json()).then((d) => { if (alive) setHits(d.hits ?? []); });
     }, 200);
-    return () => clearTimeout(t);
-  }, [q, slug]);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q, slug, searching, filters]);
+
+  const browsed = useMemo(() => (browsing && graph ? filterDocs(graph.nodes, filters) : null), [browsing, graph, filters]);
+  const pickTag = (t: string) => setTag((cur) => (cur === t ? null : t));
 
   const visible = useMemo(() => {
     if (!graph) return null;
@@ -326,33 +421,38 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
         <div className="border-b px-2.5 py-2.5" style={{ borderColor: "var(--rule-soft)" }}>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5" style={{ color: "var(--ink-3)" }} />
-            <Input className="h-8 pl-8 text-sm" placeholder="搜尋全文、標題、標籤…"
+            <Input className="h-8 pl-8 text-sm" placeholder="搜尋標題、內文、路徑、標籤…"
               value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
         </div>
-        {filter && (
-          <div style={{ padding: "8px 18px", borderBottom: "1px solid var(--rule-soft)", fontSize: 12.5 }}>
-            <span className="mono" style={{ color: "var(--accent-2)" }}>圖譜過濾：{filter}</span>
-            <button type="button" onClick={() => setFilter(null)}
-              style={{ ...bareButton, marginLeft: 10, font: "inherit", color: "var(--accent-2)" }}>清除</button>
-          </div>
+        {graph && graph.nodes.length > 0 && (
+          <FilterBar nodes={graph.nodes} f={filters} setMonth={setMonth} setTag={setTag} setFolder={setFilter} />
         )}
         <nav style={{ flex: 1, overflowY: "auto", padding: "8px 0 20px" }}>
-          {hits !== null && (
+          {searching && hits !== null && (
             <div>
-              <div className="sub" style={{ padding: "14px 18px 4px" }}>search · {hits.length}</div>
+              <div className="sub" style={{ padding: "10px 18px 4px" }}>搜尋結果 · {hits.length}</div>
               {hits.map((h) => (
-                <a key={h.path} href={`/o/${slug}/d${h.path}`}
-                  onClick={(e) => { e.preventDefault(); open(h.path, h.title); }}
-                  style={{ display: "block", padding: "8px 18px", textDecoration: "none", color: "var(--ink-2)",
-                    fontSize: 13.5, lineHeight: 1.4 }}>
-                  {h.title}
-                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.45 }}>{h.snippet}</div>
-                </a>
+                <ResultRow key={h.path} slug={slug} path={h.path} title={h.title} date={h.date} tags={h.tags}
+                  snippet={h.snippet} activeTag={filters.tag ?? null} onTag={pickTag} onOpen={open} />
+              ))}
+              {!hits.length && (
+                <div style={{ padding: "10px 18px", fontSize: 12.5, color: "var(--ink-3)" }}>
+                  找不到符合的文件{hasFilters(filters) ? "，試試清除上面的篩選" : ""}。
+                </div>
+              )}
+            </div>
+          )}
+          {browsed && (
+            <div>
+              <div className="sub" style={{ padding: "10px 18px 4px" }}>符合篩選 · {browsed.length}（新→舊）</div>
+              {browsed.map((n) => (
+                <ResultRow key={n.id} slug={slug} path={n.id} title={n.title} date={n.date} tags={n.tags}
+                  activeTag={filters.tag ?? null} onTag={pickTag} onOpen={open} />
               ))}
             </div>
           )}
-          {hits === null && !graph && (
+          {!searching && !browsing && !graph && (
             <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
               {[80, 62, 71, 55, 66, 48].map((w, i) => (
                 <div key={w} style={{ height: 13, width: `${w}%`, borderRadius: 4,
@@ -362,13 +462,13 @@ export function GraphView({ slug, orgName, role }: Readonly<{ slug: string; orgN
               <style>{`@keyframes pnsvPulse { 0%,100% { opacity: .45 } 50% { opacity: 1 } }`}</style>
             </div>
           )}
-          {hits === null && graph && !graph.nodes.length && (
+          {!searching && !browsing && graph && !graph.nodes.length && (
             <div style={{ padding: 18, color: "var(--ink-3)", fontSize: 13.5, lineHeight: 1.6 }}>
               還沒有文件。到 <a href={`/o/${slug}/settings`}>settings</a> 掛一個
               GitHub repo，push 就會自動同步進來。
             </div>
           )}
-          {hits === null && tree && (
+          {!searching && !browsing && tree && (
             <div style={{ paddingTop: 6 }}>
               {tree.folders.map((f) => (
                 <Folder key={f.path} t={f} depth={0} slug={slug} filter={filter} setFilter={setFilter}

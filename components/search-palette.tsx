@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { isSearchable } from "@/lib/find";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
 export type PaletteHit = { path: string; title: string; date: string | null; marked: string };
@@ -39,7 +40,7 @@ export function SearchPalette({ slug, open, onOpenChange, recent, onOpen }: Read
   useEffect(() => { if (!open) { setQ(""); setHits(null); } }, [open]);
 
   useEffect(() => {
-    if (q.trim().length < 2) { setHits(null); return; }
+    if (!isSearchable(q)) { setHits(null); return; }
     let alive = true;
     const t = setTimeout(() => {
       fetch(`/api/search?org=${slug}&q=${encodeURIComponent(q.trim())}`)
@@ -59,7 +60,7 @@ export function SearchPalette({ slug, open, onOpenChange, recent, onOpen }: Read
           <CommandInput placeholder="搜尋文件…" value={q} onValueChange={setQ} />
           <CommandList className="max-h-[min(60vh,420px)]">
             <CommandEmpty style={{ color: "var(--ink-3)", fontSize: 13 }}>
-              {q.trim().length < 2 ? "還沒有文件" : "找不到符合的文件"}
+              {isSearchable(q) ? "找不到符合的文件" : "還沒有文件"}
             </CommandEmpty>
             {hits === null ? (
               <CommandGroup heading="最近文件">
