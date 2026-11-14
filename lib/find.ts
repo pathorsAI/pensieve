@@ -27,7 +27,9 @@ export const normTag = (t: string) => t.trim().toLowerCase();
 
 /** Drop anything malformed so it never reaches SQL or a filter. */
 export function cleanFilters(f: FindFilters): FindFilters {
-  const folder = f.folder?.trim().replace(/\/+$/, "") || null;
+  let folder = f.folder?.trim() || null;
+  // trailing slashes off, without a regex (Sonar S5852: `/\/+$/` backtracks on long input)
+  while (folder?.endsWith("/")) folder = folder.slice(0, -1) || null;
   return {
     folder: folder?.startsWith("/") ? folder : null,
     month: f.month && MONTH.test(f.month) ? f.month : null,
