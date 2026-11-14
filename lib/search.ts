@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { db } from "./db";
+import { cleanFilters, type FindFilters } from "./find";
 
 export type Hit = {
   path: string; title: string; date: string | null; tags: string[];
@@ -20,6 +21,15 @@ type Row = {
   snip: string | null; pos: number | string | null; score: number | string | null;
   hl?: boolean | null;
 };
+
+/** Extra AND clauses for folder / month / tag (unqualified columns: each query reads one `document`). */
+function filterSql(f: FindFilters) {
+  const parts = [sql`true`];
+  if (f.folder) parts.push(sql`path like ${esc(f.folder) + "/%"}`);
+  if (f.month) parts.push(sql`date like ${f.month + "-%"}`);
+  if (f.tag) parts.push(sql`exists (select 1 from jsonb_array_elements_text(tags) as t(v) where lower(t.v) = ${f.tag})`);
+  return sql.join(parts, sql` and `);
+}
 
 const strip = (s: string) => s.replaceAll(/[\uE000\uE001]/g, "");
 const esc = (s: string) => s.replaceAll(/[%_\\]/g, (m) => "\\" + m);
@@ -51,13 +61,16 @@ function toHits(rows: Row[], q: string): Hit[] {
 /**
  * Hybrid full-text + trigram search over one organization's documents.
  * One round trip: rank in a CTE, then build snippets only for the rows that survived the limit.
+ * Path is matched too: people remember the English slug (`liontravel`, `crm-deal-desk`)
+ * as often as the Chinese title.
  */
 export async function searchDocuments(
-  orgId: string, q: string, opts?: { limit?: number }
+  orgId: string, q: string, opts?: { limit?: number } & FindFilters
 ): Promise<Hit[]> {
   const query = q.trim();
   if (!query) return [];
   const limit = Math.min(100, Math.max(1, Math.trunc(opts?.limit ?? 30)));
+  const where = filterSql(cleanFilters(opts ?? {}));
   const pat = "%" + esc(query) + "%";
   const cjk = CJK.test(query);
 
@@ -70,13 +83,14 @@ export async function searchDocuments(
       const pats = terms.map((t) => "%" + esc(t) + "%");
       const score = sql.join(terms.map((t, i) => sql`
         (case when title ilike ${pats[i]} then 0.50 else 0 end)
+        + (case when path ilike ${pats[i]} then 0.35 else 0 end)
         + (case when tags::text ilike ${pats[i]} then 0.10 else 0 end)
         + (case when strpos(lower(text), lower(${t})) > 0
              then 0.25 * greatest(0.25, 1 - strpos(lower(text), lower(${t}))::float8 / 4000) else 0 end)
         + 0.30 * greatest(similarity(title, ${t}), word_similarity(${t}, title),
              similarity(left(text, 4000), ${t}))`), sql` + `);
       const match = sql.join(terms.map((t, i) =>
-        sql`(title ilike ${pats[i]} or text ilike ${pats[i]} or tags::text ilike ${pats[i]})`), sql` and `);
+        sql`(title ilike ${pats[i]} or path ilike ${pats[i]} or text ilike ${pats[i]} or tags::text ilike ${pats[i]})`), sql` and `);
       const pos = sql.join(terms.map((t) => sql`nullif(strpos(lower(text), lower(${t})), 0)`), sql`, `);
       const r = await db.execute(sql`
         with m as (
@@ -84,7 +98,7 @@ export async function searchDocuments(
             coalesce(${pos}, 0) as pos,
             (${score}) / ${terms.length} as score
           from document
-          where organization_id = ${orgId} and ((${match}) or ${query} <% title)
+          where organization_id = ${orgId} and (${where}) and ((${match}) or ${query} <% title)
           order by score desc, date desc nulls last limit ${limit}
         )
         select path, title, date, tags, score, pos,
@@ -107,17 +121,19 @@ export async function searchDocuments(
           strpos(lower(d.text), lower(${query})) as pos,
           greatest(similarity(d.title, ${query}), word_similarity(${query}, d.title)) as tsim,
           similarity(left(d.text, 4000), ${query}) as bsim,
-          (d.title ilike ${pat}) as tmatch
+          (d.title ilike ${pat}) as tmatch,
+          (d.path ilike ${pat}) as pmatch
         from document d, tq
-        where d.organization_id = ${orgId}
-          and (d.tsv @@ tq.q or d.title ilike ${pat} or d.text ilike ${pat}
+        where d.organization_id = ${orgId} and (${where})
+          and (d.tsv @@ tq.q or d.title ilike ${pat} or d.path ilike ${pat} or d.text ilike ${pat}
             or d.tags::text ilike ${pat} or ${query} <% d.title)
       ),
       m as (
         select *,
           0.55 * (rank / (rank + 0.4))
           + 0.45 * greatest(tsim, bsim * 0.6)
-          + (case when tmatch then 0.15 else 0 end) as score
+          + (case when tmatch then 0.15 else 0 end)
+          + (case when pmatch then 0.12 else 0 end) as score
         from b order by score desc, date desc nulls last limit ${limit}
       )
       select path, title, date, tags, score, pos, hl,
@@ -136,8 +152,8 @@ export async function searchDocuments(
              then substr(text, greatest(1, strpos(lower(text), lower(${query})) - ${LEAD}), ${WINDOW})
              else left(text, 150) end as snip
       from document
-      where organization_id = ${orgId}
-        and (title ilike ${pat} or text ilike ${pat} or tags::text ilike ${pat})
+      where organization_id = ${orgId} and (${where})
+        and (title ilike ${pat} or path ilike ${pat} or text ilike ${pat} or tags::text ilike ${pat})
       order by score desc, date desc nulls last limit ${limit}`);
     return toHits(r.rows as unknown as Row[], query);
   }

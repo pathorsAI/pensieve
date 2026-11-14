@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireMember } from "@/lib/access";
+import { isSearchable } from "@/lib/find";
 import { searchDocuments } from "@/lib/search";
 
 export async function GET(req: Request) {
@@ -9,9 +10,14 @@ export async function GET(req: Request) {
   const limit = Number(u.searchParams.get("limit"));
   const access = await requireMember(slug);
   if (!access) return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  if (q.length < 2) return NextResponse.json({ hits: [] });
+  if (!isSearchable(q)) return NextResponse.json({ hits: [] });
 
-  const hits = await searchDocuments(access.org.id, q,
-    Number.isFinite(limit) && limit > 0 ? { limit } : undefined);
+  const hits = await searchDocuments(access.org.id, q, {
+    ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
+    // searchDocuments runs these through cleanFilters before they touch SQL
+    folder: u.searchParams.get("folder"),
+    month: u.searchParams.get("month"),
+    tag: u.searchParams.get("tag"),
+  });
   return NextResponse.json({ hits });
 }
